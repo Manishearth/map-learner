@@ -3,7 +3,7 @@
 
 const UI = (() => {
   const $ = id => document.getElementById(id);
-  const PREFS = 'mt.ui.v2';   // bump to reset everyone to new defaults
+  const PREFS = 'mt.ui.v3';   // bump to reset everyone to new defaults
   const TOGGLES = ['ocean', 'graticule', 'borders', 'countryLabels', 'states', 'stateLabels',
     'cityLabels', 'heatmap', 'ranges', 'deserts', 'peaks', 'rivers', 'seas'];
   let placeMarker = null, toastTimer = null;
@@ -92,7 +92,7 @@ const UI = (() => {
   }
 
   function savePrefs() {
-    const p = { basemap: $('basemap').value, cityCount: $('cityCount').value, cityCountN, cityMode: $('cityMode').value, cityScope,
+    const p = { basemap: $('basemap').value, lite: $('lite').checked, cityCount: $('cityCount').value, cityCountN, cityMode: $('cityMode').value, cityScope,
       capitalsOnly: $('capitalsOnly').checked };
     for (const t of TOGGLES) p[t] = $(t).checked;
     for (const id of ['pSource', 'pRegion', 'pTimer', 'drillCount']) p[id] = $(id).value;
@@ -102,6 +102,7 @@ const UI = (() => {
     let p = {};
     try { p = JSON.parse(localStorage.getItem(PREFS)) || {}; } catch (e) { /* ignore */ }
     if (p.basemap) $('basemap').value = p.basemap;
+    if ('lite' in p) $('lite').checked = p.lite;
     if (p.cityCount) $('cityCount').value = p.cityCount;
     if (p.cityMode) $('cityMode').value = p.cityMode;
     if (p.cityScope) setCityScope(p.cityScope);
@@ -219,6 +220,32 @@ const UI = (() => {
     document.body.appendChild(el);
   }
 
+  // Mobile Safari kills pages that use too much memory and then reloads them,
+  // without telling the page. Leave a marker while running that a normal
+  // unload removes; finding it on startup means the last run died, so switch
+  // to light mode rather than crash-looping.
+  const BOOT_KEY = 'mt.running';
+  function detectCrash() {
+    // Keyed per tab (sessionStorage survives a reload of the same tab), so a
+    // second open tab isn't mistaken for a crash of the first.
+    let crashed = false, tab = '';
+    const mark = () => { try { localStorage.setItem(BOOT_KEY, tab + ':' + Date.now()); } catch (e) { /* ignore */ } };
+    const clear = () => { try { localStorage.removeItem(BOOT_KEY); } catch (e) { /* ignore */ } };
+    try {
+      tab = sessionStorage.getItem('mt.tab') || Math.random().toString(36).slice(2);
+      sessionStorage.setItem('mt.tab', tab);
+      const [who, t] = (localStorage.getItem(BOOT_KEY) || ':').split(':');
+      crashed = who === tab && Date.now() - +t < 10 * 60 * 1000;
+    } catch (e) { return false; }   // storage unavailable
+    mark();
+    window.addEventListener('pagehide', clear);
+    document.addEventListener('visibilitychange', () => {
+      // Backgrounded tabs can be discarded legitimately; re-arm when visible.
+      if (document.hidden) clear(); else mark();
+    });
+    return crashed;
+  }
+
   function init() {
     // Surface errors instead of failing silently (handy for remote bug reports).
     window.addEventListener('error', e => toast('Error: ' + (e.message || e.error)));
@@ -227,10 +254,17 @@ const UI = (() => {
     const regionSel = $('pRegion');
     regionSel.innerHTML = Practice.regionOptions().map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
     loadPrefs();
+    if (/[?&]lite=1/.test(location.search)) $('lite').checked = true;
+    if (detectCrash() && !$('lite').checked) {
+      $('lite').checked = true;
+      savePrefs();
+      setTimeout(() => toast('The page restarted unexpectedly, so light mode is on. You can turn it off in Explore.'), 500);
+    }
 
     // Wire up every control before touching the map, so one failure there
     // can't leave the whole UI dead.
     for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => switchTab(b.dataset.tab);
+    $('lite').addEventListener('input', () => { savePrefs(); Detail.setLight($('lite').checked); });
     for (const id of [...TOGGLES, 'basemap', 'cityMode', 'cityCount', 'capitalsOnly', 'drillCount']) {
       $(id).addEventListener('input', () => {
         if (id === 'cityCount') cityCountN = sliderToCount(+$('cityCount').value);
@@ -271,6 +305,9 @@ const UI = (() => {
       return;
     }
     map.setPadding(panelPadding());
+    Detail.setLight($('lite').checked);
+    Detail.init(map);
+    map.on('webglcontextlost', () => toast('The map ran out of graphics memory; it will redraw. Light mode (Explore) may help.'));
     map.on('error', e => {
       // Individual tile failures are routine (flaky network); report the rest.
       if (!e.tile && !e.sourceId) toast('Map error: ' + (e.error && e.error.message || e.error));

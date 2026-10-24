@@ -201,12 +201,17 @@ const Practice = (() => {
   function cancelHold() {
     if (!hold) return;
     clearTimeout(hold.timer);
-    if (hold.el) hold.el.remove();
+    if (hold.el) {
+      hold.el.remove();
+      map().dragPan.enable();
+    }
     hold = null;
   }
 
   // Press and hold: after HOLD_GRACE_MS without moving (so it's not a tap or the
   // start of a drag) the ring appears and shrinks over HOLD_MS, then we guess.
+  // Once the ring is showing the hold is committed: wobbling no longer cancels
+  // it (and the map stops panning); only lifting the finger/button does.
   function onPointerDown(e) {
     if (!session || !round || e.button > 0) return;
     cancelHold();
@@ -223,8 +228,9 @@ const Practice = (() => {
       el.style.animationDuration = HOLD_MS + 'ms';
       map().getContainer().appendChild(el);
       hold.el = el;
+      map().dragPan.disable();
+      const ll = map().unproject([x, y]);   // where the ring is, even if the map nudged since
       hold.timer = setTimeout(() => {
-        const ll = map().unproject([x, y]);
         cancelHold();
         suppressClick = true;   // the mouseup that follows would otherwise re-guess
         place({ lat: ll.lat, lon: ll.lng });
@@ -233,7 +239,7 @@ const Practice = (() => {
     }, HOLD_GRACE_MS);
   }
   function onPointerMove(e) {
-    if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > hold.slop) cancelHold();
+    if (hold && !hold.el && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > hold.slop) cancelHold();
   }
   function onPointerUp() { cancelHold(); }
 

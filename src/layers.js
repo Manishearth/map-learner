@@ -13,11 +13,11 @@ const Layers = (() => {
   let map;
   // Which layers each overlay toggle controls.
   const GROUPS = {
-    ocean: ['ocean-fill', 'lake-fill'],
+    ocean: ['ocean-fill', 'lake-fill', 'd-ocean-fill', 'd-lake-fill'],
     graticule: ['grat-line', 'grat-major', 'grat-label'],
-    borders: ['country-line'],
+    borders: ['country-line', 'd-country-line'],
     countryLabels: ['country-label', 'country-label-minor'],
-    states: ['state-line'],
+    states: ['state-line', 'd-state-line'],
     stateLabels: ['state-label'],
     cities: ['city-dot'],
     cityLabels: ['city-label'],
@@ -25,7 +25,7 @@ const Layers = (() => {
     ranges: ['range-fill', 'range-line', 'range-label'],
     deserts: ['other-fill', 'other-label'],
     peaks: ['peak-label'],
-    rivers: ['river-line', 'river-label', 'lake-label'],
+    rivers: ['river-line', 'river-label', 'd-river-line', 'd-river-label', 'lake-label'],
     seas: ['sea-label'],
   };
   const state = {};   // overlay name -> bool
@@ -96,6 +96,7 @@ const Layers = (() => {
   const EMPTY = { type: 'FeatureCollection', features: [] };
 
   function style() {
+    citiesFC();   // builds places + placeFeatures (used by the city overlay)
     const ph = MT.physical;
     const raster = (tiles, maxzoom, attribution) =>
       ({ type: 'raster', tiles: [tiles], tileSize: 256, maxzoom, attribution });
@@ -119,13 +120,21 @@ const Layers = (() => {
         countryPts: { type: 'geojson', data: pointsFrom(MT.countries) },
         states: { type: 'geojson', data: MT.admin1 },
         statePts: { type: 'geojson', data: pointsFrom(MT.admin1) },
-        cities: { type: 'geojson', data: citiesFC() },   // all places: heatmap
+        cities: { type: 'geojson', data: EMPTY },   // all places, for the heatmap; filled when it's first shown
         cityView: { type: 'geojson', data: EMPTY },       // just the top N in view
         regions: { type: 'geojson', data: ph.regions },
         peaks: { type: 'geojson', data: ph.peaks },
         rivers: { type: 'geojson', data: ph.rivers },
         lakes: { type: 'geojson', data: ph.lakes },
-        water: { type: 'geojson', data: MT.lakes },
+        water: { type: 'geojson', data: MT.physical.lakes },
+        borderLines: { type: 'geojson', data: MT.borders.country },
+        stateLines: { type: 'geojson', data: MT.borders.state },
+        // Full detail for the cells on screen, streamed in by Detail when zoomed in.
+        'd-ocean': { type: 'geojson', data: EMPTY, maxzoom: 12 },
+        'd-lakes': { type: 'geojson', data: EMPTY, maxzoom: 12 },
+        'd-rivers': { type: 'geojson', data: EMPTY, maxzoom: 12 },
+        'd-borders': { type: 'geojson', data: EMPTY, maxzoom: 12 },
+        'd-states': { type: 'geojson', data: EMPTY, maxzoom: 12 },
         review: { type: 'geojson', data: EMPTY },
         seas: { type: 'geojson', data: ph.seas },
         grat: { type: 'geojson', data: graticuleFC() },
@@ -173,13 +182,13 @@ const Layers = (() => {
         { id: 'grat-major', type: 'line', source: 'grat', layout: { visibility: 'none' },
           filter: ['==', ['get', 'major'], 1],
           paint: { 'line-color': '#ffe08a', 'line-opacity': 0.55, 'line-width': 1.2, 'line-dasharray': [4, 3] } },
-        { id: 'state-line', type: 'line', source: 'states',
+        { id: 'state-line', type: 'line', source: 'stateLines',
           paint: { 'line-color': '#ffffff', 'line-opacity': 0.55, 'line-width': 0.8, 'line-dasharray': [3, 2] } },
         { id: 'hl-state-fill', type: 'fill', source: 'states', filter: ['==', ['get', 'name'], '\u0000'],
           paint: { 'fill-color': '#40c0ff', 'fill-opacity': 0.25 } },
         { id: 'hl-state-line', type: 'line', source: 'states', filter: ['==', ['get', 'name'], '\u0000'],
           paint: { 'line-color': '#40c0ff', 'line-width': 2 } },
-        { id: 'country-line', type: 'line', source: 'countries',
+        { id: 'country-line', type: 'line', source: 'borderLines',
           paint: { 'line-color': '#ffd84a', 'line-opacity': 0.85,
             'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.8, 6, 1.8] } },
         { id: 'hl-country-fill', type: 'fill', source: 'countries', filter: ['==', ['get', 'iso'], '\u0000'],
@@ -271,8 +280,21 @@ const Layers = (() => {
             'text-size': ['interpolate', ['linear'], ['zoom'], 1, ['max', 10, ['-', 15, ['get', 'rank']]], 5, 16],
             'text-max-width': 8 },
           paint: { 'text-color': '#ffe9a0', 'text-halo-color': '#000', 'text-halo-width': 1.6 } },
-      ],
+      ].flatMap(l => DETAIL_TWINS[l.id]
+        ? [l, Object.assign({}, l, { id: 'd-' + l.id, source: DETAIL_TWINS[l.id], minzoom: DETAIL_ZOOM })]
+        : [l]),
     };
+  }
+
+  // Base layers that get a full-detail twin above DETAIL_ZOOM (see Detail).
+  const DETAIL_ZOOM = 5;
+  const DETAIL_TWINS = { 'ocean-fill': 'd-ocean', 'lake-fill': 'd-lakes', 'river-line': 'd-rivers',
+    'river-label': 'd-rivers', 'country-line': 'd-borders', 'state-line': 'd-states' };
+  // Once detail data is arriving, hand those zoom levels over from the coarse
+  // base layers. (If it can't load, e.g. opened from file://, the base layers
+  // simply keep drawing at every zoom.)
+  function useDetail() {
+    for (const id of Object.keys(DETAIL_TWINS)) map.setLayerZoomRange(id, 0, DETAIL_ZOOM);
   }
 
   function init(container) {
@@ -282,6 +304,9 @@ const Layers = (() => {
     const initial = {};
     for (const [id, src] of Object.entries(st.sources)) {
       if (src.type === 'geojson' && src.data !== EMPTY) { initial[id] = src.data; src.data = EMPTY; }
+      // The base data is coarse anyway: don't let MapLibre build tiles past z8
+      // (it overzooms instead), which saves worker memory.
+      if (src.type === 'geojson' && !src.maxzoom) src.maxzoom = 8;
     }
     map = new maplibregl.Map({
       container, style: st, center: [-40, 25], zoom: 1.6, validateStyle: false,
@@ -307,9 +332,11 @@ const Layers = (() => {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   }
 
+  let heatLoaded = false;
   function set(name, on) {
     state[name] = on;
     for (const id of GROUPS[name] || []) vis(id, on);
+    if (name === 'heatmap' && on && !heatLoaded) { heatLoaded = true; setData('cities', citiesFC()); }
     if (name === 'cities' || name === 'cityLabels') applyCityFilter();
   }
 
@@ -463,7 +490,7 @@ const Layers = (() => {
   }
 
   return { init, set, setBasemap, setCityCount, setCapitalsOnly, setCityMode, setCityScope, countKeepingVisible, snapshot, restore, only,
-    review, showHints, places, onScreen,
+    review, showHints, places, onScreen, useDetail, DETAIL_ZOOM,
     highlightCountry, highlightState, clearHighlights, setData, circlePolygon, vis,
     get map() { return map; }, get state() { return state; } };
 })();

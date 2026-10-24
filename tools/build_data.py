@@ -27,6 +27,13 @@ OUT = os.path.join(APP, 'data')
 
 # Countries maptap labels as "City, State, Country".
 STATE_COUNTRIES = ['US', 'CN', 'BR', 'IN', 'RU', 'CL', 'AU', 'ID', 'MX', 'AR', 'CA']
+STATE_A3 = {'USA', 'CHN', 'BRA', 'IND', 'RUS', 'CHL', 'AUS', 'IDN', 'MEX', 'ARG', 'CAN'}
+
+# Simplification tolerances (degrees). The always-loaded base data is coarse
+# to keep memory low (mobile Safari kills heavy pages); full detail is
+# streamed per grid cell when zoomed in.
+BASE_TOL = 0.04
+DETAIL_TOL = 0.004
 
 # Display names, matching maptap's spelling where we've seen it.
 COUNTRY_DISPLAY = {
@@ -271,7 +278,7 @@ def build_countries(cinfo):
         p = f['properties']
         iso = p['ISO_A2_EH'] if p['ISO_A2_EH'] != '-99' else p['ISO_A2']
         name = cinfo.get(iso, {}).get('name') or p['NAME']
-        g = simplify_geom(f['geometry'], 0.01)
+        g = simplify_geom(f['geometry'], BASE_TOL)
         if not g:
             continue
         feats.append(feature(g, {'name': name, 'iso': iso,
@@ -287,7 +294,7 @@ def build_admin1():
         p = f['properties']
         if p['iso_a2'] not in STATE_COUNTRIES:
             continue
-        g = simplify_geom(f['geometry'], 0.008)
+        g = simplify_geom(f['geometry'], BASE_TOL)
         if not g:
             continue
         feats.append(feature(g, {'name': p['name'], 'iso': p['iso_a2'],
@@ -313,7 +320,7 @@ def build_physical():
         k = keep.get(p['FEATURECLA'])
         if not k or not p['NAME']:
             continue
-        g = simplify_geom(f['geometry'], 0.03, 2)
+        g = simplify_geom(f['geometry'], 0.05, 2)
         if g:
             feats.append(feature(g, {'name': p['NAME'], 'kind': k,
                                      'rank': p['SCALERANK']}))
@@ -326,13 +333,13 @@ def build_physical():
                                 'rank': f['properties']['scalerank']})
                        for f in d['features'] if f['properties']['name']])
 
-    d = load_geojson('ne_10m_rivers_lake_centerlines')
+    d = load_geojson('ne_50m_rivers_lake_centerlines')
     feats = []
     for f in d['features']:
         p = f['properties']
-        if p['featurecla'] != 'River' or p['scalerank'] > 9:
+        if p['featurecla'] == 'Lake Centerline':
             continue
-        g = simplify_geom(f['geometry'], 0.005, 3)
+        g = simplify_geom(f['geometry'], 0.02, 2)
         if g:
             feats.append(feature(g, {'name': p['name'] or '', 'rank': p['scalerank']}))
     out['rivers'] = fc(feats)
@@ -352,38 +359,92 @@ def build_physical():
                       if f['properties']['name'] and simplify_geom(f['geometry'], 0.05, 2)])
     write_js('physical.js', 'physical', out)
 
-    # Flat water, painted over the imagery like maptap does. 10m so coastlines
-    # still line up with the imagery at regional zoom levels.
-    write_js('ocean.js', 'ocean', fc(grid_split(load_geojson('ne_10m_ocean')['features'], 0.004)))
-    lakes = [f for f in load_geojson('ne_10m_lakes')['features'] if f['properties']['scalerank'] <= 7]
-    write_js('lakes.js', 'lakes', fc(grid_split(lakes, 0.004)))
+    # Flat water, painted over the imagery like maptap does. Coarse here; the
+    # 10m coastline is streamed per grid cell when zoomed in (build_detail).
+    cells = grid_split(load_geojson('ne_50m_ocean')['features'], 0.02, 'polygon')
+    write_js('ocean.js', 'ocean', fc([f for fs in cells.values() for f in fs]))
 
 
-def grid_split(features, tol, cell=10):
-    """Simplify polygons topology-safely and cut them into cell x cell degree pieces.
+def build_borders():
+    """Land borders as lines (coastlines come from the water layer instead,
+    so they aren't stored twice): countries, and states of STATE_COUNTRIES."""
+    d = load_geojson('ne_50m_admin_0_boundary_lines_land')
+    country = [feature(g, {}) for g in (simplify_geom(f['geometry'], 0.02) for f in d['features']) if g]
+    d = load_geojson('ne_10m_admin_1_states_provinces_lines')
+    state = [feature(g, {}) for g in (simplify_geom(f['geometry'], BASE_TOL)
+                                      for f in d['features'] if f['properties']['ADM0_A3'] in STATE_A3) if g]
+    write_js('borders.js', 'borders', {'country': fc(country), 'state': fc(state)})
 
-    Natural Earth's 10m ocean is one world-sized polygon with ~6800 holes. Fed
-    to MapLibre as-is (especially after naive simplification) its triangulation
-    breaks and paints bands of water across land, so repair it and hand over
-    many small valid polygons instead. Needs shapely (build time only)."""
+
+DETAIL_CELL = 10   # degrees; must match DETAIL_CELL in src/detail.js
+
+
+def build_detail():
+    """Full-detail water, rivers and borders, one JSON file per 10-degree cell
+    (data/detail/<x>_<y>.json), fetched only for cells on screen when zoomed in.
+    Keeps memory proportional to what's being looked at, not the whole world."""
+    river_feats = [f for f in load_geojson('ne_10m_rivers_lake_centerlines')['features']
+                   if f['properties']['featurecla'] == 'River' and f['properties']['scalerank'] <= 9]
+    for f in river_feats:
+        f['properties'] = {'name': f['properties']['name'] or '', 'rank': f['properties']['scalerank']}
+    layers = {
+        'ocean': grid_split(load_geojson('ne_10m_ocean')['features'], DETAIL_TOL, 'polygon'),
+        'lakes': grid_split([f for f in load_geojson('ne_10m_lakes')['features']
+                             if f['properties']['scalerank'] <= 9], DETAIL_TOL, 'polygon'),
+        'rivers': grid_split(river_feats, DETAIL_TOL, 'line'),
+        'borders': grid_split(load_geojson('ne_10m_admin_0_boundary_lines_land')['features'], DETAIL_TOL, 'line'),
+        'states': grid_split([f for f in load_geojson('ne_10m_admin_1_states_provinces_lines')['features']
+                              if f['properties']['ADM0_A3'] in STATE_A3], DETAIL_TOL, 'line'),
+    }
+    out_dir = os.path.join(OUT, 'detail')
+    os.makedirs(out_dir, exist_ok=True)
+    for old in glob.glob(os.path.join(out_dir, '*.json')):
+        os.remove(old)
+    cells = sorted(set(k for cells in layers.values() for k in cells))
+    total = 0
+    for k in cells:
+        data = {name: fc(cells_.get(k, [])) for name, cells_ in layers.items()}
+        path = os.path.join(out_dir, '%d_%d.json' % k)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+        total += os.path.getsize(path)
+    write_js('detail-index.js', 'detailCells', ['%d_%d' % k for k in cells])
+    print('wrote %d detail cells (%.0f KB total)' % (len(cells), total / 1024))
+
+
+def grid_split(features, tol, kind, cell=DETAIL_CELL):
+    """Simplify topology-safely and cut into cell x cell degree pieces.
+
+    Returns {(cell_x, cell_y): [features]}. Natural Earth's ocean is one
+    world-sized polygon with thousands of holes; fed to MapLibre whole
+    (especially after naive simplification) its triangulation breaks and
+    paints bands of water across land, so it gets repaired and split.
+    Needs shapely (build time only)."""
     from shapely.geometry import shape, box, mapping
     from shapely.validation import make_valid
-    geoms = [make_valid(shape(f['geometry']).simplify(tol, preserve_topology=True)) for f in features]
-    out = []
+    want = ('Polygon', 'MultiPolygon') if kind == 'polygon' else ('LineString', 'MultiLineString')
+    geoms = []
+    for f in features:
+        g = shape(f['geometry']).simplify(tol, preserve_topology=True)
+        geoms.append((make_valid(g) if kind == 'polygon' else g, f.get('properties') or {}))
+    out = {}
+    rnd = lambda v: round(float(v), 3)
     for x in range(-180, 180, cell):
         for y in range(-90, 90, cell):
             b = box(x, y, x + cell, y + cell)
-            for g in geoms:
+            for g, props in geoms:
                 if not g.intersects(b):
                     continue
-                piece = make_valid(g.intersection(b))
-                parts = getattr(piece, 'geoms', [piece])
-                for p in parts:
-                    if p.geom_type not in ('Polygon', 'MultiPolygon') or p.is_empty:
+                piece = g.intersection(b)
+                if kind == 'polygon':
+                    piece = make_valid(piece)
+                for p in getattr(piece, 'geoms', [piece]):
+                    if p.geom_type not in want or p.is_empty:
                         continue
                     m = mapping(p)
-                    out.append(feature({'type': m['type'], 'coordinates': json.loads(json.dumps(
-                        m['coordinates'], default=list), parse_float=lambda v: round(float(v), 3))}, {}))
+                    coords = json.loads(json.dumps(m['coordinates'], default=list), parse_float=rnd)
+                    out.setdefault((x // cell, y // cell), []).append(
+                        feature({'type': m['type'], 'coordinates': coords}, props))
     return out
 
 
@@ -585,6 +646,10 @@ def main():
         build_admin1()
     if not only or 'physical' in only:
         build_physical()
+    if not only or 'borders' in only:
+        build_borders()
+    if not only or 'detail' in only:
+        build_detail()
     if not only or 'cities' in only:
         build_cities(cinfo, a1names)
     if not only or 'seen' in only:

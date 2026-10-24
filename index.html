@@ -32,7 +32,8 @@
         <option value="esri">Esri satellite (sharp when zoomed)</option>
       </select>
     </label>
-    <label class="check"><input type="checkbox" id="ocean"> Flat blue ocean</label>
+    <label class="check"><input type="checkbox" id="ocean" checked> Flat blue ocean</label>
+    <label class="check"><input type="checkbox" id="lite"> Light mode <small>(less detail when zoomed in; for older phones)</small></label>
     <label class="check"><input type="checkbox" id="graticule"> Lat/long grid (10&deg;, tropics, equator)</label>
 
     <h2>Borders</h2>
@@ -130,10 +131,12 @@
 <script src="data/cities.js"></script>
 <script src="data/physical.js"></script>
 <script src="data/ocean.js"></script>
-<script src="data/lakes.js"></script>
+<script src="data/borders.js"></script>
+<script src="data/detail-index.js"></script>
 <script src="data/seen.js"></script>
 <script src="src/geo.js"></script>
 <script src="src/layers.js"></script>
+<script src="src/detail.js"></script>
 <script src="src/learn.js"></script>
 <script src="src/practice.js"></script>
 <script src="src/drill.js"></script>
