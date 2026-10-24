@@ -108,4 +108,11 @@ tr.click { cursor: pointer; } tr.click:hover { background: #232b45; }
 #card .nav { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 #card .nav span { color: var(--muted); flex: 1; font-size: 12px; }
 tr.sel { background: #2d3758; }
+.chip { display: inline-flex; margin-left: 4px; border: 1px solid var(--line); border-radius: 999px;
+  overflow: hidden; vertical-align: middle; }
+.chip button { border: none; border-radius: 0; background: transparent; color: var(--muted);
+  padding: 1px 10px; font-size: 12px; }
+.chip button + button { border-left: 1px solid var(--line); }
+.chip button.on { background: #3858c8; color: #fff; }
+div.row input[type=range] { display: block; width: 100%; margin-top: 6px; }
 button:disabled { opacity: .5; cursor: wait; }

@@ -66,11 +66,26 @@ const UI = (() => {
     Practice.start();
   }
 
-  // 0..100 -> 0, 3 .. ~1000 cities in view (log scale).
-  const sliderToCount = v => v <= 0 ? 0 : Math.round(3 * Math.pow(10, v / 100 * 2.5));
+  // Slider 0..100 on a log scale: 3 .. ~1000 cities in view, or 3 .. ~30k
+  // worldwide (a fixed set that doesn't change as you pan).
+  let cityScope = 'view';
+  const sliderSpan = () => cityScope === 'world' ? 4 : 2.5;
+  const sliderToCount = v => v <= 0 ? 0 : Math.round(3 * Math.pow(10, v / 100 * sliderSpan()));
+  const countToSlider = n => n <= 0 ? 0 : Math.max(1, Math.min(100, Math.round(Math.log10(n / 3) / sliderSpan() * 100)));
+  // The exact count shown. The slider sets it, but switching scope sets it
+  // directly (the log-scale slider can't hit every count) and nudges the
+  // slider to the nearest position.
+  let cityCountN = null;
+  function setCityScope(s) {
+    cityScope = s;
+    for (const b of document.querySelectorAll('#cityScope button')) {
+      b.classList.toggle('on', b.dataset.scope === s);
+      b.setAttribute('aria-checked', b.dataset.scope === s);
+    }
+  }
 
   function savePrefs() {
-    const p = { basemap: $('basemap').value, cityCount: $('cityCount').value, cityMode: $('cityMode').value,
+    const p = { basemap: $('basemap').value, cityCount: $('cityCount').value, cityCountN, cityMode: $('cityMode').value, cityScope,
       capitalsOnly: $('capitalsOnly').checked };
     for (const t of TOGGLES) p[t] = $(t).checked;
     for (const id of ['pSource', 'pRegion', 'pTimer', 'drillCount']) p[id] = $(id).value;
@@ -82,6 +97,8 @@ const UI = (() => {
     if (p.basemap) $('basemap').value = p.basemap;
     if (p.cityCount) $('cityCount').value = p.cityCount;
     if (p.cityMode) $('cityMode').value = p.cityMode;
+    if (p.cityScope) setCityScope(p.cityScope);
+    if (p.cityCountN != null) cityCountN = p.cityCountN;
     if ('capitalsOnly' in p) $('capitalsOnly').checked = p.capitalsOnly;
     for (const t of TOGGLES) if (t in p) $(t).checked = p[t];
     for (const id of ['pSource', 'pRegion', 'pTimer', 'drillCount']) if (p[id]) $(id).value = p[id];
@@ -91,9 +108,11 @@ const UI = (() => {
     Layers.setBasemap($('basemap').value);
     for (const t of TOGGLES) Layers.set(t, $(t).checked);
     Layers.set('cities', true);
-    const n = sliderToCount(+$('cityCount').value);
+    if (cityCountN === null) cityCountN = sliderToCount(+$('cityCount').value);
+    const n = cityCountN;
     $('cityCountOut').textContent = n.toLocaleString();
     Layers.setCityMode($('cityMode').value);
+    Layers.setCityScope(cityScope);
     Layers.setCityCount(n);
     Layers.setCapitalsOnly($('capitalsOnly').checked);
     $('drillCountOut').textContent = $('drillCount').value;
@@ -187,12 +206,22 @@ const UI = (() => {
     for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => switchTab(b.dataset.tab);
     for (const id of [...TOGGLES, 'basemap', 'cityMode', 'cityCount', 'capitalsOnly', 'drillCount']) {
       $(id).addEventListener('input', () => {
+        if (id === 'cityCount') cityCountN = sliderToCount(+$('cityCount').value);
         savePrefs();
         if (Practice.active || Drill.active) UI.toast('Overlay changes apply after you stop the game.');
         else applyControls();
       });
     }
     for (const id of ['pSource', 'pRegion', 'pTimer']) $(id).addEventListener('change', savePrefs);
+    for (const b of document.querySelectorAll('#cityScope button')) b.onclick = () => {
+      if (b.dataset.scope === cityScope) return;
+      const keep = Layers.countKeepingVisible(b.dataset.scope);
+      setCityScope(b.dataset.scope);
+      if (keep !== null) cityCountN = keep;
+      $('cityCount').value = countToSlider(cityCountN);
+      savePrefs();
+      applyControls();
+    };
     const canvas = map.getCanvasContainer();
     canvas.addEventListener('pointerdown', e => Practice.onPointerDown(e));
     canvas.addEventListener('pointermove', e => Practice.onPointerMove(e));

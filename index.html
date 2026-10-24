@@ -49,9 +49,12 @@
         <option value="seen">Places maptap has asked me</option>
       </select>
     </label>
-    <label class="row">Show the top <b id="cityCountOut">25</b> in view
-      <input type="range" id="cityCount" min="0" max="100" value="37">
-    </label>
+    <div class="row">Show the top <b id="cityCountOut">25</b>
+      <span class="chip" id="cityScope" role="radiogroup">
+        <button data-scope="view" class="on" role="radio">in view</button><button data-scope="world" role="radio">in the world</button>
+      </span>
+      <input type="range" id="cityCount" min="0" max="100" value="37" aria-label="Number of cities">
+    </div>
     <label class="check"><input type="checkbox" id="cityLabels" checked> City names <small>(off = click dots to reveal)</small></label>
     <label class="check"><input type="checkbox" id="capitalsOnly"> Capitals only (national &amp; state)</label>
     <label class="check"><input type="checkbox" id="heatmap"> Population density</label>

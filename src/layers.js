@@ -29,7 +29,7 @@ const Layers = (() => {
     seas: ['sea-label'],
   };
   const state = {};   // overlay name -> bool
-  let cityCount = 40, capitalsOnly = false, cityMode = 'likely';
+  let cityCount = 40, capitalsOnly = false, cityMode = 'likely', cityScope = 'view';
 
   // Every labelable place: GeoNames cities plus places maptap has asked (seen).
   // `id` is the feature id used in filters; r/lr/sr are sort ranks for the
@@ -329,28 +329,46 @@ const Layers = (() => {
   // The chosen places go into a small 'cityView' source rather than filtering
   // the full ~35k-point source: a filter change makes MapLibre re-process every
   // tile of the big source, and rapid slider moves queued up behind each other.
-  // Updates are coalesced to one per frame and skipped when nothing changed.
+  // Bursts of updates (e.g. slider input) are coalesced and skipped when nothing changed.
   let cityFrame = 0, lastCityKey = '';
   function applyCityFilter() {
-    if (!cityFrame) cityFrame = requestAnimationFrame(updateCities);
+    if (!cityFrame) cityFrame = setTimeout(updateCities, 0);
   }
+  // Predicate for "this place counts as in view" (what the in-view mode ranks).
+  function inViewTest() {
+    // Cheap distance pre-check before projecting: nothing farther from the
+    // centre than the farthest screen corner can be on screen. (getBounds()
+    // under-reports the edges in globe projection, so don't use it.)
+    let maxKm = Infinity;
+    if (map.getZoom() > 3) {
+      const cv = map.getCanvas(), c = map.getCenter();
+      const ctr = { lat: c.lat, lon: c.lng };
+      maxKm = 0;
+      for (const [x, y] of [[0, 0], [cv.clientWidth, 0], [0, cv.clientHeight], [cv.clientWidth, cv.clientHeight]]) {
+        const ll = map.unproject([x, y]);
+        maxKm = Math.max(maxKm, Geo.distKm(ctr, { lat: ll.lat, lon: ll.lng }));
+      }
+      maxKm = maxKm * 1.15 + 50;
+      return p => Geo.distKm(ctr, p) <= maxKm && onScreen(p.lon, p.lat, 40);
+    }
+    return p => onScreen(p.lon, p.lat, 40);
+  }
+  const eligible = p => !capitalsOnly || p.flag;
+
+  let shownIds = [];
   function updateCities() {
     cityFrame = 0;
     if (!map || !map.getSource('cityView')) return;
     const ids = [];
     if (cityCount > 0) {
-      // Cheap lat/lon pre-check before projecting (bounds are unreliable when
-      // most of the globe is visible).
-      const b = map.getZoom() > 3 ? map.getBounds() : null;
-      const [w, so, e, n] = b ? [b.getWest() - 2, b.getSouth() - 2, b.getEast() + 2, b.getNorth() + 2] : [];
+      const inView = cityScope === 'view' ? inViewTest() : null;   // world: fixed global set
       for (const p of orders[cityMode]) {
-        if (capitalsOnly && !p.flag) continue;
-        if (b && (p.lat < so || p.lat > n || (w <= e ? (p.lon < w || p.lon > e) : (p.lon < w && p.lon > e)))) continue;
-        if (!onScreen(p.lon, p.lat, 40)) continue;
+        if (!eligible(p) || (inView && !inView(p))) continue;
         ids.push(p.id);
         if (ids.length >= cityCount) break;
       }
     }
+    shownIds = ids;
     const key = cityMode + ':' + ids.join(',');
     if (key !== lastCityKey) {
       lastCityKey = key;
@@ -361,9 +379,30 @@ const Layers = (() => {
     vis('city-dot', ids.length > 0 && state.cities !== false);
     vis('city-label', ids.length > 0 && state.cities !== false && state.cityLabels !== false);
   }
+
+  // The count that keeps the cities currently on screen unchanged when
+  // switching to `scope`: going to 'world', the global rank of the lowest-ranked
+  // visible city; going to 'view', how many shown cities are in view.
+  function countKeepingVisible(scope) {
+    if (cityFrame) { clearTimeout(cityFrame); updateCities(); }   // make shownIds current
+    const inView = inViewTest();
+    const visible = shownIds.filter(id => inView(places[id]));
+    if (!visible.length) return null;
+    if (scope === 'view') return visible.length;
+    const want = new Set(visible);
+    let rank = 0, last = 0;
+    for (const p of orders[cityMode]) {
+      if (!eligible(p)) continue;
+      rank++;
+      if (want.delete(p.id)) last = rank;
+      if (!want.size) break;
+    }
+    return last;
+  }
   function setCityCount(n) { cityCount = n; applyCityFilter(); }
   function setCapitalsOnly(on) { capitalsOnly = on; applyCityFilter(); }
   function setCityMode(m) { cityMode = m; applyCityFilter(); }
+  function setCityScope(s) { cityScope = s; applyCityFilter(); }
 
   // Save / restore overlay visibility (practice mode hides everything while guessing).
   function snapshot() { return Object.assign({}, state); }
@@ -417,7 +456,7 @@ const Layers = (() => {
     return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [coords] } };
   }
 
-  return { init, set, setBasemap, setCityCount, setCapitalsOnly, setCityMode, snapshot, restore, only,
+  return { init, set, setBasemap, setCityCount, setCapitalsOnly, setCityMode, setCityScope, countKeepingVisible, snapshot, restore, only,
     review, showHints, places, onScreen,
     highlightCountry, highlightState, clearHighlights, setData, circlePolygon, vis,
     get map() { return map; }, get state() { return state; } };
