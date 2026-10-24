@@ -4,7 +4,8 @@
 
 const Practice = (() => {
   const HIST_KEY = 'mt.practice.v1';
-  const HOLD_MS = 2000;
+  const HOLD_GRACE_MS = 200;
+  const HOLD_MS = 1000;
   const $ = id => document.getElementById(id);
   const map = () => Layers.map;
 
@@ -194,34 +195,41 @@ const Practice = (() => {
   }
 
   // ---- guessing -------------------------------------------------------------
-  let hold = null;   // {x, y, lngLat, el, timer}
+  let hold = null;   // {x, y, el, timer}
   let suppressClick = false;
 
   function cancelHold() {
     if (!hold) return;
     clearTimeout(hold.timer);
-    hold.el.remove();
+    if (hold.el) hold.el.remove();
     hold = null;
   }
 
+  // Press and hold: after HOLD_GRACE_MS without moving (so it's not a tap or the
+  // start of a drag) the ring appears and shrinks over HOLD_MS, then we guess.
   function onPointerDown(e) {
     if (!session || !round || e.button > 0) return;
     cancelHold();
     suppressClick = false;   // only the click ending the hold that guessed is ignored
     const rect = map().getContainer().getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    const el = document.createElement('div');
-    el.className = 'holdring';
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
-    map().getContainer().appendChild(el);
-    hold = { x: e.clientX, y: e.clientY, el, timer: setTimeout(() => {
-      const ll = map().unproject([x, y]);
-      cancelHold();
-      suppressClick = true;   // the mouseup that follows would otherwise re-guess
-      place({ lat: ll.lat, lon: ll.lng });
-      submit();
-    }, HOLD_MS) };
+    hold = { x: e.clientX, y: e.clientY, el: null };
+    hold.timer = setTimeout(() => {
+      const el = document.createElement('div');
+      el.className = 'holdring';
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.style.animationDuration = HOLD_MS + 'ms';
+      map().getContainer().appendChild(el);
+      hold.el = el;
+      hold.timer = setTimeout(() => {
+        const ll = map().unproject([x, y]);
+        cancelHold();
+        suppressClick = true;   // the mouseup that follows would otherwise re-guess
+        place({ lat: ll.lat, lon: ll.lng });
+        submit();
+      }, HOLD_MS);
+    }, HOLD_GRACE_MS);
   }
   function onPointerMove(e) {
     if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) cancelHold();

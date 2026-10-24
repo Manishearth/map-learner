@@ -58,17 +58,16 @@ const Layers = (() => {
     };
   }
 
+  let placeFeatures = null;   // index == place id
   function citiesFC() {
     if (!places.length) buildPlaces();
     const big = 1e9;
-    return {
-      type: 'FeatureCollection',
-      features: places.map(p => ({
+    placeFeatures = placeFeatures || places.map(p => ({
         type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
         properties: { id: p.id, n: p.name, p: p.pop, f: p.flag, s: p.seen || 0,
           r: p.popRank ?? big, lr: p.likelyRank ?? big, sr: p.seenRank ?? big },
-      })),
-    };
+      }));
+    return { type: 'FeatureCollection', features: placeFeatures };
   }
 
   function graticuleFC() {
@@ -120,7 +119,8 @@ const Layers = (() => {
         countryPts: { type: 'geojson', data: pointsFrom(MT.countries) },
         states: { type: 'geojson', data: MT.admin1 },
         statePts: { type: 'geojson', data: pointsFrom(MT.admin1) },
-        cities: { type: 'geojson', data: citiesFC() },
+        cities: { type: 'geojson', data: citiesFC() },   // all places: heatmap
+        cityView: { type: 'geojson', data: EMPTY },       // just the top N in view
         regions: { type: 'geojson', data: ph.regions },
         peaks: { type: 'geojson', data: ph.peaks },
         rivers: { type: 'geojson', data: ph.rivers },
@@ -206,7 +206,7 @@ const Layers = (() => {
             'circle-color': ['interpolate', ['linear'], ['get', 'avg'], 40, '#d7191c', 75, '#fdae61', 90, '#ffffbf', 97, '#1a9641'],
             'circle-stroke-color': '#000', 'circle-stroke-width': 1,
           } },
-        { id: 'city-dot', type: 'circle', source: 'cities',
+        { id: 'city-dot', type: 'circle', source: 'cityView',
           paint: {
             'circle-radius': ['interpolate', ['linear'], ['zoom'],
               1, ['interpolate', ['linear'], ['get', 'p'], 0, 1.5, 1e6, 2.5, 1e7, 4],
@@ -257,7 +257,7 @@ const Layers = (() => {
             'text-letter-spacing': 0.05, 'text-max-width': 7 },
           minzoom: 2.2,
           paint: { 'text-color': '#cfeaff', 'text-halo-color': '#000', 'text-halo-width': 1.2, 'text-opacity': 0.9 } },
-        { id: 'city-label', type: 'symbol', source: 'cities',
+        { id: 'city-label', type: 'symbol', source: 'cityView',
           layout: { 'text-field': ['get', 'n'], 'text-font': FONT, 'symbol-sort-key': ['get', 'lr'],
             'text-size': ['interpolate', ['linear'], ['get', 'p'], 0, 11, 1e6, 13, 1e7, 15],
             'text-anchor': 'left', 'text-offset': [0.5, 0], 'text-optional': false },
@@ -325,22 +325,39 @@ const Layers = (() => {
 
   // Show the top-N places *in view* for the current mode, so zooming in
   // reveals more local cities instead of only the world's biggest.
+  //
+  // The chosen places go into a small 'cityView' source rather than filtering
+  // the full ~35k-point source: a filter change makes MapLibre re-process every
+  // tile of the big source, and rapid slider moves queued up behind each other.
+  // Updates are coalesced to one per frame and skipped when nothing changed.
+  let cityFrame = 0, lastCityKey = '';
   function applyCityFilter() {
-    if (!map || !map.getLayer('city-dot')) return;
+    if (!cityFrame) cityFrame = requestAnimationFrame(updateCities);
+  }
+  function updateCities() {
+    cityFrame = 0;
+    if (!map || !map.getSource('cityView')) return;
     const ids = [];
     if (cityCount > 0) {
+      // Cheap lat/lon pre-check before projecting (bounds are unreliable when
+      // most of the globe is visible).
+      const b = map.getZoom() > 3 ? map.getBounds() : null;
+      const [w, so, e, n] = b ? [b.getWest() - 2, b.getSouth() - 2, b.getEast() + 2, b.getNorth() + 2] : [];
       for (const p of orders[cityMode]) {
         if (capitalsOnly && !p.flag) continue;
+        if (b && (p.lat < so || p.lat > n || (w <= e ? (p.lon < w || p.lon > e) : (p.lon < w && p.lon > e)))) continue;
         if (!onScreen(p.lon, p.lat, 40)) continue;
         ids.push(p.id);
         if (ids.length >= cityCount) break;
       }
     }
-    const f = ['in', ['get', 'id'], ['literal', ids]];
-    map.setFilter('city-dot', f);
-    map.setFilter('city-label', f);
-    map.setLayoutProperty('city-label', 'symbol-sort-key',
-      ['get', { pop: 'r', likely: 'lr', seen: 'sr' }[cityMode]]);
+    const key = cityMode + ':' + ids.join(',');
+    if (key !== lastCityKey) {
+      lastCityKey = key;
+      map.getSource('cityView').setData({ type: 'FeatureCollection', features: ids.map(id => placeFeatures[id]) });
+      map.setLayoutProperty('city-label', 'symbol-sort-key',
+        ['get', { pop: 'r', likely: 'lr', seen: 'sr' }[cityMode]]);
+    }
     vis('city-dot', ids.length > 0 && state.cities !== false);
     vis('city-label', ids.length > 0 && state.cities !== false && state.cityLabels !== false);
   }

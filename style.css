@@ -103,7 +103,7 @@ tr.click { cursor: pointer; } tr.click:hover { background: #232b45; }
 #banner button.on { background: #3858c8; border-color: #4a6be0; }
 .holdring { position: absolute; z-index: 8; pointer-events: none; border: 3px solid #ffcc33;
   border-radius: 50%; box-shadow: 0 0 8px #000; transform: translate(-50%, -50%);
-  animation: hold 2s linear forwards; }
+  animation: hold 1s linear forwards; }
 @keyframes hold { from { width: 110px; height: 110px; opacity: .5; } to { width: 12px; height: 12px; opacity: 1; } }
 #card .nav { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 #card .nav span { color: var(--muted); flex: 1; font-size: 12px; }

@@ -354,13 +354,37 @@ def build_physical():
 
     # Flat water, painted over the imagery like maptap does. 10m so coastlines
     # still line up with the imagery at regional zoom levels.
-    d = load_geojson('ne_10m_ocean')
-    g = [simplify_geom(f['geometry'], 0.004) for f in d['features']]
-    write_js('ocean.js', 'ocean', fc([feature(x, {}) for x in g if x]))
-    d = load_geojson('ne_10m_lakes')
-    g = [simplify_geom(f['geometry'], 0.004) for f in d['features']
-         if f['properties']['scalerank'] <= 7]
-    write_js('lakes.js', 'lakes', fc([feature(x, {}) for x in g if x]))
+    write_js('ocean.js', 'ocean', fc(grid_split(load_geojson('ne_10m_ocean')['features'], 0.004)))
+    lakes = [f for f in load_geojson('ne_10m_lakes')['features'] if f['properties']['scalerank'] <= 7]
+    write_js('lakes.js', 'lakes', fc(grid_split(lakes, 0.004)))
+
+
+def grid_split(features, tol, cell=10):
+    """Simplify polygons topology-safely and cut them into cell x cell degree pieces.
+
+    Natural Earth's 10m ocean is one world-sized polygon with ~6800 holes. Fed
+    to MapLibre as-is (especially after naive simplification) its triangulation
+    breaks and paints bands of water across land, so repair it and hand over
+    many small valid polygons instead. Needs shapely (build time only)."""
+    from shapely.geometry import shape, box, mapping
+    from shapely.validation import make_valid
+    geoms = [make_valid(shape(f['geometry']).simplify(tol, preserve_topology=True)) for f in features]
+    out = []
+    for x in range(-180, 180, cell):
+        for y in range(-90, 90, cell):
+            b = box(x, y, x + cell, y + cell)
+            for g in geoms:
+                if not g.intersects(b):
+                    continue
+                piece = make_valid(g.intersection(b))
+                parts = getattr(piece, 'geoms', [piece])
+                for p in parts:
+                    if p.geom_type not in ('Polygon', 'MultiPolygon') or p.is_empty:
+                        continue
+                    m = mapping(p)
+                    out.append(feature({'type': m['type'], 'coordinates': json.loads(json.dumps(
+                        m['coordinates'], default=list), parse_float=lambda v: round(float(v), 3))}, {}))
+    return out
 
 
 # ------------------------------------------------------------------ cities
