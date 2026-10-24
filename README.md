@@ -3,6 +3,9 @@
 A static, no-server study tool for [maptap.gg](https://maptap.gg). Open `index.html`
 through any static file server (e.g. `python -m http.server` in this folder).
 
+Note: This is basically entirely vibecoded. I thought it would be a fun experiment
+and also useful as a way to learn more geography.
+
 ## What it does
 
 - **Explore**: a globe with Sentinel-2 cloudless imagery and flat navy water (maptap
