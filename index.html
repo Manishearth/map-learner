@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map Learner</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="panel">
+  <header>
+    <h1>Map Learner</h1>
+    <button id="collapse" title="Hide panel">&laquo;</button>
+  </header>
+  <nav id="tabs">
+    <button data-tab="explore" class="active">Explore</button>
+    <button data-tab="practice">Practice</button>
+    <button data-tab="drill">Drills</button>
+    <button data-tab="stats">My stats</button>
+  </nav>
+
+  <section id="tab-explore" class="tab active">
+    <h2>Base map</h2>
+    <label class="row">Imagery
+      <select id="basemap">
+        <option value="bm">Blue Marble (maptap-like)</option>
+        <option value="relief">Blue Marble + shaded relief</option>
+        <option value="esri">Esri satellite (sharp when zoomed)</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="ocean" checked> Flat blue ocean</label>
+    <label class="check"><input type="checkbox" id="graticule"> Lat/long grid (10&deg;, tropics, equator)</label>
+
+    <h2>Borders</h2>
+    <label class="check"><input type="checkbox" id="borders" checked> Country borders</label>
+    <label class="check"><input type="checkbox" id="countryLabels" checked> Country names</label>
+    <label class="check"><input type="checkbox" id="states" checked> States / provinces <small>(the 11 countries maptap names states for)</small></label>
+    <label class="check"><input type="checkbox" id="stateLabels" checked> State names</label>
+
+    <h2>Cities</h2>
+    <label class="row">Show the <b id="cityCountOut">500</b> largest
+      <input type="range" id="cityCount" min="0" max="100" value="45">
+    </label>
+    <label class="check"><input type="checkbox" id="cityLabels" checked> City names <small>(off = click dots to reveal)</small></label>
+    <label class="check"><input type="checkbox" id="capitalsOnly"> Capitals only (national &amp; state)</label>
+    <label class="check"><input type="checkbox" id="seenCities"> Places maptap has asked <small>(from your stats)</small></label>
+    <label class="check"><input type="checkbox" id="heatmap"> Population density</label>
+
+    <h2>Nature</h2>
+    <label class="check"><input type="checkbox" id="ranges" checked> Mountain ranges</label>
+    <label class="check"><input type="checkbox" id="deserts"> Deserts, plateaus, basins &amp; plains</label>
+    <label class="check"><input type="checkbox" id="peaks"> Peaks</label>
+    <label class="check"><input type="checkbox" id="rivers" checked> Rivers</label>
+    <label class="check"><input type="checkbox" id="seas"> Seas, gulfs &amp; bays</label>
+
+    <h2>Find</h2>
+    <input id="search" type="search" placeholder="Search a city or country&hellip;" autocomplete="off">
+    <ul id="searchResults" class="results"></ul>
+    <p class="hint">Click any city dot for details, or anywhere on the map to see which country/state it's in.</p>
+  </section>
+
+  <section id="tab-practice" class="tab">
+    <p class="hint">Endless maptap-style rounds. Click the globe to place your guess, then press <kbd>Enter</kbd>.</p>
+    <label class="row">Places
+      <select id="pSource">
+        <option value="mixed">Mixed: maptap-style pool</option>
+        <option value="seen">Only places maptap has asked me</option>
+        <option value="weak">My weak spots (needs stats)</option>
+        <option value="cities">Cities only (generated)</option>
+      </select>
+    </label>
+    <label class="row">Region
+      <select id="pRegion"></select>
+    </label>
+    <label class="row">While guessing show
+      <select id="pAssist">
+        <option value="none">Nothing (like maptap)</option>
+        <option value="borders">Country borders</option>
+        <option value="states">Borders + states</option>
+        <option value="nature">Borders + mountains + rivers</option>
+      </select>
+    </label>
+    <label class="row">Timer
+      <select id="pTimer">
+        <option value="0">Off (daily mode)</option>
+        <option value="25">25 s (versus)</option>
+        <option value="20">20 s</option>
+      </select>
+    </label>
+    <button id="pStart" class="primary">Start practice</button>
+    <div id="pLog"></div>
+  </section>
+
+  <section id="tab-drill" class="tab">
+    <p class="hint">Short drills on whatever part of the world is in view. Zoom to a region first.</p>
+    <div class="drills">
+      <button data-drill="findCity">Find the city<small>Name shown &rarr; click its dot</small></button>
+      <button data-drill="nameCity">Name the dot<small>Dot shown &rarr; pick its name</small></button>
+      <button data-drill="country">Find the country<small>No borders shown</small></button>
+      <button data-drill="state">Find the state<small>Brazil, India, US, China&hellip;</small></button>
+    </div>
+    <label class="row">Cities in play: the <b id="drillCountOut"></b> largest in view
+      <input type="range" id="drillCount" min="4" max="60" value="15">
+    </label>
+    <div id="drillOut"></div>
+  </section>
+
+  <section id="tab-stats" class="tab">
+    <p class="hint">Load your maptap CSV exports (locations, history, versus). They stay in this browser.</p>
+    <input type="file" id="statsFiles" accept=".csv" multiple>
+    <div id="statsOut"></div>
+  </section>
+</aside>
+<button id="expand" title="Show panel">&raquo;</button>
+
+<div id="banner" hidden></div>
+<div id="card" hidden></div>
+<div id="toast" hidden></div>
+
+<script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<script src="data/countries.js"></script>
+<script src="data/admin1.js"></script>
+<script src="data/cities.js"></script>
+<script src="data/physical.js"></script>
+<script src="data/ocean.js"></script>
+<script src="data/seen.js"></script>
+<script src="src/geo.js"></script>
+<script src="src/layers.js"></script>
+<script src="src/learn.js"></script>
+<script src="src/practice.js"></script>
+<script src="src/drill.js"></script>
+<script src="src/stats.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
