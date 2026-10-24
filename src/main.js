@@ -3,7 +3,7 @@
 
 const UI = (() => {
   const $ = id => document.getElementById(id);
-  const PREFS = 'mt.ui.v1';
+  const PREFS = 'mt.ui.v2';   // bump to reset everyone to new defaults
   const TOGGLES = ['ocean', 'graticule', 'borders', 'countryLabels', 'states', 'stateLabels',
     'cityLabels', 'heatmap', 'ranges', 'deserts', 'peaks', 'rivers', 'seas'];
   let placeMarker = null, toastTimer = null;
