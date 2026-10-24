@@ -55,7 +55,7 @@ const Learn = (() => {
     const cf = Geo.countryAt(pt.lon, pt.lat);
     const cc = opts.cc || (cf && cf.properties.iso);
     const sf = Geo.stateAt(pt.lon, pt.lat);
-    const pop = opts.pop || 0;
+    let pop = opts.pop || 0;
     const country = cc ? Geo.countryName(cc) : (cf ? cf.properties.name : null);
     const stateName = sf && sf.properties.iso === cc ? sf.properties.name : null;
 
@@ -63,6 +63,7 @@ const Learn = (() => {
     const cap = cc && Geo.capitals[cc];
     const near = Geo.citiesNear(pt, 900);
     const self = near.find(x => x.d < 8 && (!opts.name || Geo.norm(x.c.name) === Geo.norm(opts.name)));
+    if (!pop && self) pop = self.c.pop;
     // Prefer a big city in the same country; fall back to any big neighbour.
     const threshold = Math.max(500000, pop * 1.5);
     const bigOk = x => x.c.pop >= threshold && x.d > 8 && (!cap || x.c !== cap);

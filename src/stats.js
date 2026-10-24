@@ -182,7 +182,8 @@ const Stats = (() => {
         { h: '≈ miss', num: 1, f: r => Geo.fmtKm(Geo.kmFor(r.avg)) }], true)}</div>
       ${unresolved.length ? `<p class="hint">Couldn't place: ${unresolved.join('; ')}</p>` : ''}`;
 
-    $('statsOnMap').checked = Layers.map.getLayoutProperty('stats-dot', 'visibility') === 'visible';
+    $('statsOnMap').checked = !!Layers.map.getLayer('stats-dot') &&
+      Layers.map.getLayoutProperty('stats-dot', 'visibility') === 'visible';
     $('statsOnMap').onchange = e => Layers.vis('stats-dot', e.target.checked);
     $('practiceWeak').onclick = () => UI.startPractice({ source: 'weak', region: 'world' });
     for (const tr of document.querySelectorAll('#ccTable tr.click')) tr.onclick = () =>
