@@ -213,7 +213,8 @@ const Practice = (() => {
     suppressClick = false;   // only the click ending the hold that guessed is ignored
     const rect = map().getContainer().getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    hold = { x: e.clientX, y: e.clientY, el: null };
+    // Fingers wobble more than mice; don't treat that as a drag.
+    hold = { x: e.clientX, y: e.clientY, el: null, slop: e.pointerType === 'touch' ? 16 : 8 };
     hold.timer = setTimeout(() => {
       const el = document.createElement('div');
       el.className = 'holdring';
@@ -232,7 +233,7 @@ const Practice = (() => {
     }, HOLD_GRACE_MS);
   }
   function onPointerMove(e) {
-    if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) cancelHold();
+    if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > hold.slop) cancelHold();
   }
   function onPointerUp() { cancelHold(); }
 
@@ -387,20 +388,29 @@ const Practice = (() => {
     const cls = rec.score >= 95 ? 'score-good' : rec.score >= 85 ? 'score-ok' : 'score-bad';
     const statAvg = Stats.avgFor(t.label);
     const n = session.rounds.length;
+    const dist = rec.skipped ? 'Skipped' : rec.km === null ? 'No guess' : Geo.fmtKm(rec.km) + ' away';
+    // On phones the card stays a one-line summary unless expanded, so it
+    // doesn't cover the globe you're tapping on.
     UI.card(`
       <div class="nav"><button id="cPrev" ${i === 0 ? 'disabled' : ''}>‹</button>
         <span>Round ${i + 1} of ${n}${i === n - 1 ? ' (last)' : ''}</span>
+        <button id="cMore">${session.cardOpen ? 'Less' : 'Details'}</button>
         <button id="cShow">Show on map</button>
         <button id="cNext" ${i === n - 1 ? 'disabled' : ''}>›</button>
         <button id="cClose">×</button></div>
+      <div class="summary"><b class="${cls}">${rec.score}</b> · ${dist} · ${t.label}</div>
+      <div class="details">
       <div class="big ${cls}">${rec.score}</div>
-      <div>${rec.skipped ? 'Skipped' : rec.km === null ? 'No guess' : Geo.fmtKm(rec.km) + ' away'}${rec.hints ? ` · ${rec.hints} hint${rec.hints > 1 ? 's' : ''}` : ''}</div>
+      <div>${dist}${rec.hints ? ` · ${rec.hints} hint${rec.hints > 1 ? 's' : ''}` : ''}</div>
       <h3>${t.label}</h3>
       ${info.state ? `<div>${info.state}, ${info.country}</div>` : ''}
       ${guessLine}
       <ul>${info.facts.map(f => `<li>${f}</li>`).join('')}</ul>
       ${statAvg !== null ? `<p class="hint">Your maptap average here: ${statAvg}</p>` : ''}
-      ${t.src === 'seen' ? '<p class="hint">maptap has asked about this place before.</p>' : ''}`);
+      ${t.src === 'seen' ? '<p class="hint">maptap has asked about this place before.</p>' : ''}
+      </div>`);
+    $('card').classList.toggle('mini', !session.cardOpen);
+    $('cMore').onclick = () => { session.cardOpen = !session.cardOpen; showRound(i, false); };
     $('cPrev').onclick = () => showRound(i - 1, true);
     $('cNext').onclick = () => showRound(i + 1, true);
     $('cShow').onclick = () => showRound(i, true);

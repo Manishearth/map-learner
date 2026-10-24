@@ -13,8 +13,12 @@ const Drill = (() => {
     const p = m.project([lon, lat]);
     const cv = m.getCanvas();
     const w = cv.clientWidth, h = cv.clientHeight;
-    const panelW = document.getElementById('panel').classList.contains('collapsed') ? 0 : 340;
-    return p.x > panelW + 10 && p.x < w - 10 && p.y > 70 && p.y < h - 10;
+    // Keep clear of the panel (left on desktop, a bottom sheet on phones) and the banner.
+    const open = UI.panelOpen();
+    const left = open && !UI.narrow() ? 340 : 0;
+    const bottom = open && UI.narrow() ? document.getElementById('panel').offsetHeight : 0;
+    const top = (document.getElementById('banner').offsetHeight || 60) + 10;
+    return p.x > left + 10 && p.x < w - 10 && p.y > top && p.y < h - bottom - 10;
   }
 
   function citiesInView(n) {
@@ -73,9 +77,11 @@ const Drill = (() => {
     }) });
   }
 
-  function banner(prompt, sub) {
+  // extra: more HTML under the prompt (the name-the-dot choices live here, so
+  // they stay visible when the side panel is hidden on phones).
+  function banner(prompt, sub, extra = '') {
     $('banner').innerHTML = `<div class="prompt">${prompt}</div>
-      <div class="sub"><span>${d.right}/${d.total} right</span>${sub || ''}<button id="dStop">Stop</button></div>`;
+      <div class="sub"><span>${d.right}/${d.total} right</span>${sub || ''}<button id="dStop">Stop</button></div>${extra}`;
     $('banner').hidden = false;
     $('dStop').onclick = stop;
   }
@@ -96,10 +102,9 @@ const Drill = (() => {
       const others = d.items.filter(c => c !== t)
         .sort((a, b) => Geo.distKm(a, t) - Geo.distKm(b, t)).slice(0, 6);
       const opts = shuffle([t, ...shuffle(others).slice(0, 3)]);
-      banner('Which city is the yellow dot?');
-      $('drillOut').innerHTML = `<div class="choices">${opts.map(c =>
-        `<button data-i="${c.i}">${c.name}<small> ${Geo.fmtPop(c.pop)}</small></button>`).join('')}</div>`;
-      for (const b of $('drillOut').querySelectorAll('button')) b.onclick = () => answerName(b, opts);
+      d.opts = opts;
+      banner('Which city is the yellow dot?', '', choicesHtml(opts));
+      for (const b of $('banner').querySelectorAll('.choices button')) b.onclick = () => answerName(+b.dataset.i);
     } else {
       const p = t.properties;
       banner(`Click: ${p.name}`, d.kind === 'state' ? `<span>${Geo.countryName(p.iso)}</span>` : '');
@@ -114,21 +119,25 @@ const Drill = (() => {
     return a;
   }
 
-  function answerName(btn, opts) {
+  function choicesHtml(opts, picked) {
+    const t = d.target;
+    const cls = c => picked === undefined ? '' : c.i === t.i ? 'right' : c.i === picked ? 'wrong' : '';
+    return `<div class="choices">${opts.map(c =>
+      `<button data-i="${c.i}" class="${cls(c)}">${c.name}<small> ${Geo.fmtPop(c.pop)}</small></button>`).join('')}</div>`;
+  }
+
+  function answerName(picked) {
     if (d.answered) { next(); return; }
     d.answered = true;
     d.total++;
-    const t = d.target;
-    const ok = +btn.dataset.i === t.i;
+    const t = d.target, opts = d.opts;
+    const ok = picked === t.i;
     if (ok) d.right++;
-    for (const b of $('drillOut').querySelectorAll('button')) {
-      if (+b.dataset.i === t.i) b.classList.add('right');
-      else if (b === btn) b.classList.add('wrong');
-    }
     const labels = {};
     for (const c of opts) labels[c.i] = c.name;
     cityDots({ [t.i]: ok ? 'right' : 'target' }, labels);
-    banner(ok ? 'Right!' : `That's ${t.name}`, '<span>Enter / click for next</span>');
+    banner(ok ? 'Right!' : `That's ${t.name}`, '<span>Tap / Enter for next</span>', choicesHtml(opts, picked));
+    for (const b of $('banner').querySelectorAll('.choices button')) b.onclick = () => next();
     if (ok) setTimeout(() => { if (d && d.answered && d.target === t) next(); }, 900);
   }
 

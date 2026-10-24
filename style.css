@@ -57,6 +57,7 @@ kbd { background: #2a3350; border-radius: 3px; padding: 0 4px; font-size: 12px; 
 .drills button { text-align: left; padding: 8px; }
 .drills button small { display: block; font-size: 11px; }
 .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+#banner .choices button { padding: 8px 6px; font-size: 14px; }
 .choices button.right { background: #1f6b3e; border-color: var(--good); }
 .choices button.wrong { background: #6b1f1f; border-color: var(--bad); }
 
@@ -107,6 +108,9 @@ tr.click { cursor: pointer; } tr.click:hover { background: #232b45; }
 @keyframes hold { from { width: 110px; height: 110px; opacity: .5; } to { width: 12px; height: 12px; opacity: 1; } }
 #card .nav { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 #card .nav span { color: var(--muted); flex: 1; font-size: 12px; }
+#card .summary { display: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cMore { display: none; }
+@media (max-width: 699px) { #cMore { display: inline-block; } }
 tr.sel { background: #2d3758; }
 .chip { display: inline-flex; margin-left: 4px; border: 1px solid var(--line); border-radius: 999px;
   overflow: hidden; vertical-align: middle; }
@@ -116,3 +120,34 @@ tr.sel { background: #2d3758; }
 .chip button.on { background: #3858c8; color: #fff; }
 div.row input[type=range] { display: block; width: 100%; margin-top: 6px; }
 button:disabled { opacity: .5; cursor: wait; }
+
+/* Long-press on the map is hold-to-guess: no text selection or iOS callout. */
+#map { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
+#fatal { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column;
+  justify-content: center; padding: 24px; background: var(--bg); text-align: center; }
+
+/* ---- phones ---------------------------------------------------------------- */
+@media (max-width: 699px) {
+  #panel { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 55vh;
+    border-radius: 12px 12px 0 0; border-bottom: none; }
+  #collapse { transform: rotate(-90deg); }
+  #expand { top: auto; bottom: 14px; left: 10px; z-index: 9; padding: 8px 14px; }
+  #expand::after { content: ' Menu'; }
+  body:not(.collapsed) #banner, #banner { left: 6px; right: 6px; top: 6px; transform: none;
+    min-width: 0; max-width: none; padding: 6px 8px; }
+  #banner .prompt { font-size: 18px; }
+  #banner .sub { gap: 6px; }
+  #banner button { padding: 5px 9px; font-size: 13px; }   /* bigger tap targets */
+  #card { left: 6px; right: 6px; width: auto; bottom: 60px; max-height: 40vh; padding: 8px 12px; }
+  #card .big { font-size: 22px; }
+  #card.mini .details { display: none; }
+  #card.mini .summary { display: block; }
+  #card .nav { flex-wrap: wrap; }
+  #card .nav button { padding: 5px 9px; }
+  .maplibregl-ctrl-top-right { display: none; }   /* pinch to zoom; the banner sits here */
+  #toast { bottom: 64px; max-width: calc(100vw - 24px); }
+  .drills button { padding: 10px 8px; }
+  label.check { margin: 8px 0; }
+}
+body:not(.collapsed) #expand { display: none; }

@@ -45,6 +45,12 @@ const UI = (() => {
   // Map padding that keeps a point clear of the side panel and the result card.
   function revealPadding() {
     const w = Layers.map.getContainer().clientWidth, h = Layers.map.getContainer().clientHeight;
+    if (narrow()) {
+      // Phone: banner on top, result card as a bottom sheet.
+      const top = Math.min(h * 0.3, ($('banner').offsetHeight || 60) + 12);
+      const bottom = Math.min(h * 0.45, $('card').hidden ? 40 : $('card').offsetHeight + 16);
+      return { left: 10, right: 10, top, bottom };
+    }
     let left = $('panel').classList.contains('collapsed') ? 40 : 360;
     let right = 390;   // room for the result card
     const spare = w - left - right - 150;
@@ -63,6 +69,7 @@ const UI = (() => {
     if (opts.source) $('pSource').value = opts.source;
     if (opts.region) $('pRegion').value = opts.region;
     Drill.stop();
+    gameStarting();
     Practice.start();
   }
 
@@ -183,38 +190,59 @@ const UI = (() => {
     popup = new maplibregl.Popup().setLngLat(e.lngLat).setHTML(html).addTo(map);
   }
 
+  // ---- panel / layout ---------------------------------------------------------
+  // Phones get the panel as a bottom sheet; games hide it so the banner and
+  // map are usable.
+  const narrow = () => window.innerWidth < 700;
+  const panelOpen = () => !$('panel').classList.contains('collapsed');
+  let map = null;
+
+  function panelPadding() {
+    if (!panelOpen()) return { left: 0, top: 0, right: 0, bottom: 0 };
+    if (narrow()) return { left: 0, top: 0, right: 0, bottom: $('panel').offsetHeight };
+    return { left: 340, top: 0, right: 0, bottom: 0 };
+  }
+  function setPanel(open) {
+    $('panel').classList.toggle('collapsed', !open);
+    document.body.classList.toggle('collapsed', !open);
+    if (map) map.easeTo({ padding: panelPadding(), duration: 300 });
+  }
+  // Starting a game on a phone: get the panel out of the way.
+  function gameStarting() { if (narrow()) setPanel(false); }
+
+  function showFatal(msg) {
+    const el = document.createElement('div');
+    el.id = 'fatal';
+    el.innerHTML = `<h2>The map couldn't start</h2><p>${msg}</p>
+      <p>Map Learner needs WebGL 2: a recent Chrome, Firefox, Edge or Safari (iOS 15+),
+      with hardware acceleration / WebGL enabled.</p>`;
+    document.body.appendChild(el);
+  }
+
   function init() {
+    // Surface errors instead of failing silently (handy for remote bug reports).
+    window.addEventListener('error', e => toast('Error: ' + (e.message || e.error)));
+    window.addEventListener('unhandledrejection', e => toast('Error: ' + (e.reason && e.reason.message || e.reason)));
+
     const regionSel = $('pRegion');
     regionSel.innerHTML = Practice.regionOptions().map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
     loadPrefs();
 
-    const map = Layers.init('map');
-    map.once('styledata', () => {
-      applyControls();
-      Stats.load();
-      for (const b of document.querySelectorAll('#pStart, [data-drill]')) b.disabled = false;
-    });
-    for (const b of document.querySelectorAll('#pStart, [data-drill]')) b.disabled = true;
-    map.on('click', e => {
-      if (Practice.onMapClick(e)) return;
-      if (Drill.onMapClick(e)) return;
-      exploreClick(e);
-    });
-    map.on('mouseenter', 'city-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', 'city-dot', () => { map.getCanvas().style.cursor = ''; });
-
+    // Wire up every control before touching the map, so one failure there
+    // can't leave the whole UI dead.
     for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => switchTab(b.dataset.tab);
     for (const id of [...TOGGLES, 'basemap', 'cityMode', 'cityCount', 'capitalsOnly', 'drillCount']) {
       $(id).addEventListener('input', () => {
         if (id === 'cityCount') cityCountN = sliderToCount(+$('cityCount').value);
         savePrefs();
+        if (!map) return;
         if (Practice.active || Drill.active) UI.toast('Overlay changes apply after you stop the game.');
         else applyControls();
       });
     }
     for (const id of ['pSource', 'pRegion', 'pTimer']) $(id).addEventListener('change', savePrefs);
     for (const b of document.querySelectorAll('#cityScope button')) b.onclick = () => {
-      if (b.dataset.scope === cityScope) return;
+      if (b.dataset.scope === cityScope || !map) return;
       const keep = Layers.countKeepingVisible(b.dataset.scope);
       setCityScope(b.dataset.scope);
       if (keep !== null) cityCountN = keep;
@@ -222,34 +250,51 @@ const UI = (() => {
       savePrefs();
       applyControls();
     };
-    const canvas = map.getCanvasContainer();
-    canvas.addEventListener('pointerdown', e => Practice.onPointerDown(e));
-    canvas.addEventListener('pointermove', e => Practice.onPointerMove(e));
-    canvas.addEventListener('pointerup', e => Practice.onPointerUp(e));
-    canvas.addEventListener('pointercancel', e => Practice.onPointerUp(e));
-    $('pStart').onclick = () => { Drill.stop(); Practice.start(); };
-    for (const b of document.querySelectorAll('[data-drill]')) b.onclick = () => Drill.start(b.dataset.drill);
+    $('pStart').onclick = () => { Drill.stop(); gameStarting(); Practice.start(); };
+    for (const b of document.querySelectorAll('[data-drill]')) b.onclick = () => { gameStarting(); Drill.start(b.dataset.drill); };
     $('statsFiles').onchange = e => Stats.addFiles(e.target.files);
     $('search').addEventListener('input', e => search(e.target.value));
-    $('collapse').onclick = () => {
-      $('panel').classList.add('collapsed');
-      document.body.classList.add('collapsed');
-      map.easeTo({ padding: { left: 0, top: 0, right: 0, bottom: 0 } });
-    };
-    $('expand').onclick = () => {
-      $('panel').classList.remove('collapsed');
-      document.body.classList.remove('collapsed');
-      map.easeTo({ padding: { left: 340, top: 0, right: 0, bottom: 0 } });
-    };
-
+    $('collapse').onclick = () => setPanel(false);
+    $('expand').onclick = () => setPanel(true);
+    window.addEventListener('resize', () => { if (map) map.setPadding(panelPadding()); });
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && e.target.type !== 'range') return;
       if (e.target.tagName === 'SELECT') return;
       if (Practice.onKey(e) || Drill.onKey(e)) e.preventDefault();
     });
+
+    for (const b of document.querySelectorAll('#pStart, [data-drill]')) b.disabled = true;
+    try {
+      map = Layers.init('map');
+    } catch (err) {
+      showFatal(String(err && err.message || err));
+      return;
+    }
+    map.setPadding(panelPadding());
+    map.on('error', e => {
+      // Individual tile failures are routine (flaky network); report the rest.
+      if (!e.tile && !e.sourceId) toast('Map error: ' + (e.error && e.error.message || e.error));
+    });
+    map.once('styledata', () => {
+      applyControls();
+      Stats.load();
+      for (const b of document.querySelectorAll('#pStart, [data-drill]')) b.disabled = false;
+    });
+    map.on('click', e => {
+      if (Practice.onMapClick(e)) return;
+      if (Drill.onMapClick(e)) return;
+      exploreClick(e);
+    });
+    map.on('mouseenter', 'city-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', 'city-dot', () => { map.getCanvas().style.cursor = ''; });
+    const canvas = map.getCanvasContainer();
+    canvas.addEventListener('pointerdown', e => Practice.onPointerDown(e));
+    canvas.addEventListener('pointermove', e => Practice.onPointerMove(e));
+    canvas.addEventListener('pointerup', e => Practice.onPointerUp(e));
+    canvas.addEventListener('pointercancel', e => Practice.onPointerUp(e));
   }
 
-  return { init, toast, card, showPlace, startPractice, revealPadding };
+  return { init, toast, card, showPlace, startPractice, revealPadding, narrow, panelOpen };
 })();
 
 UI.init();

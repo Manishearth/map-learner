@@ -293,7 +293,13 @@ const Layers = (() => {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
     map.on('moveend', applyCityFilter);
-    map.setPadding({ left: 340, top: 0, right: 0, bottom: 0 });
+    // Compact attribution starts expanded and covers the bottom of small
+    // screens; start it collapsed (its ⓘ button still opens it).
+    map.once('load', () => {
+      const a = container instanceof HTMLElement ? container : document.getElementById(container);
+      const el = a.querySelector('.maplibregl-ctrl-attrib');
+      if (el) el.classList.remove('maplibregl-compact-show');
+    });
     return map;
   }
 
