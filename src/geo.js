@@ -125,7 +125,7 @@ const Geo = (() => {
   const stateCountries = new Set(C.stateCountries);
   const cities = C.rows.map((r, i) => ({
     i, name: r[0], lat: r[1], lon: r[2], pop: r[3], cc: r[4],
-    a1: C.admin1[r[5]], flag: r[6],
+    a1: C.admin1[r[5]], flag: r[6], likely: r[7],
   }));
   const countryName = cc => (countries[cc] || [cc])[0];
   const continentOf = cc => (countries[cc] || [, ''])[1];

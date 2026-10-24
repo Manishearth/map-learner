@@ -326,13 +326,13 @@ def build_physical():
                                 'rank': f['properties']['scalerank']})
                        for f in d['features'] if f['properties']['name']])
 
-    d = load_geojson('ne_50m_rivers_lake_centerlines')
+    d = load_geojson('ne_10m_rivers_lake_centerlines')
     feats = []
     for f in d['features']:
         p = f['properties']
-        if p['featurecla'] == 'Lake Centerline':
+        if p['featurecla'] != 'River' or p['scalerank'] > 9:
             continue
-        g = simplify_geom(f['geometry'], 0.02, 2)
+        g = simplify_geom(f['geometry'], 0.005, 3)
         if g:
             feats.append(feature(g, {'name': p['name'] or '', 'rank': p['scalerank']}))
     out['rivers'] = fc(feats)
@@ -352,9 +352,15 @@ def build_physical():
                       if f['properties']['name'] and simplify_geom(f['geometry'], 0.05, 2)])
     write_js('physical.js', 'physical', out)
 
-    d = load_geojson('ne_50m_ocean')
-    g = [simplify_geom(f['geometry'], 0.01) for f in d['features']]
+    # Flat water, painted over the imagery like maptap does. 10m so coastlines
+    # still line up with the imagery at regional zoom levels.
+    d = load_geojson('ne_10m_ocean')
+    g = [simplify_geom(f['geometry'], 0.004) for f in d['features']]
     write_js('ocean.js', 'ocean', fc([feature(x, {}) for x in g if x]))
+    d = load_geojson('ne_10m_lakes')
+    g = [simplify_geom(f['geometry'], 0.004) for f in d['features']
+         if f['properties']['scalerank'] <= 7]
+    write_js('lakes.js', 'lakes', fc([feature(x, {}) for x in g if x]))
 
 
 # ------------------------------------------------------------------ cities
@@ -396,24 +402,64 @@ def read_cities(path, a1names):
     return rows
 
 
+def haversine(a_lat, a_lon, b_lat, b_lon):
+    p = math.pi / 180
+    h = (math.sin((b_lat - a_lat) * p / 2) ** 2 +
+         math.cos(a_lat * p) * math.cos(b_lat * p) * math.sin((b_lon - a_lon) * p / 2) ** 2)
+    return 12742 * math.asin(min(1, math.sqrt(h)))
+
+
+def find_satellites(rows, km=40, ratio=2):
+    """Indexes of cities with a city at least `ratio`x bigger within `km`.
+
+    rows must be sorted by population, descending."""
+    grid = {}
+    sats = set()
+    for i, r in enumerate(rows):
+        gy, gx = int(r['lat'] // 1), int(r['lon'] // 1)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for j in grid.get((gy + dy, gx + dx), ()):
+                    o = rows[j]
+                    if o['pop'] > ratio * r['pop'] and \
+                            3 < haversine(r['lat'], r['lon'], o['lat'], o['lon']) <= km:
+                        sats.add(i)
+                        break
+        grid.setdefault((gy, gx), []).append(i)
+    return sats
+
+
+def maptap_logit(pop, flag, satellite):
+    """How likely maptap is to ask about a city, x100 (a logit).
+
+    Logistic fit over ~920 cities maptap asked in one player's history vs. all
+    GeoNames cities >15k: bigger is likelier, admin/national capitals much
+    likelier, and suburbs/satellites of a 2x-bigger city within 40 km ~3.5x
+    less likely (e.g. Gazipur next to Dhaka)."""
+    z = (-3.91 + 2.23 * (math.log10(max(pop, 1)) - 5) + 1.74 * (flag == 1) +
+         4.62 * (flag == 2) - 1.25 * satellite)
+    return int(round(z * 100))
+
+
 def build_cities(cinfo, a1names):
     rows = read_cities(os.path.join(RAW, 'cities15000.txt'), a1names)
     # Drop city sections/neighbourhoods; they clutter labels.
     rows = [r for r in rows if r['fcode'] not in ('PPLX', 'PPLH', 'PPLQ', 'PPLW')]
     rows.sort(key=lambda r: -r['pop'])
+    satellites = find_satellites(rows)
     a1_list, a1_idx = [], {}
     out = []
-    for r in rows:
+    for i, r in enumerate(rows):
         flag = 2 if r['fcode'] == 'PPLC' else (1 if r['fcode'] == 'PPLA' else 0)
         key = r['cc'] + '|' + r['a1']
         if key not in a1_idx:
             a1_idx[key] = len(a1_list)
             a1_list.append(r['a1'])
         out.append([r['name'], round(r['lat'], 3), round(r['lon'], 3), r['pop'],
-                    r['cc'], a1_idx[key], flag])
+                    r['cc'], a1_idx[key], flag, maptap_logit(r['pop'], flag, i in satellites)])
     countries = {k: [v['name'], v['cont']] for k, v in cinfo.items()}
     write_js('cities.js', 'cities', {
-        'fields': ['name', 'lat', 'lon', 'pop', 'cc', 'a1', 'flag'],
+        'fields': ['name', 'lat', 'lon', 'pop', 'cc', 'a1', 'flag', 'likely'],
         'admin1': a1_list, 'countries': countries,
         'stateCountries': STATE_COUNTRIES, 'rows': out})
     return rows

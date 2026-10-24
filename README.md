@@ -5,22 +5,41 @@ through any static file server (e.g. `python -m http.server` in this folder).
 
 ## What it does
 
-- **Explore**: a globe with Blue Marble imagery (maptap-like, flat blue ocean) and
-  toggleable overlays: country borders, states/provinces for the countries maptap
-  names states for, a slider for how many cities to show (by population), population
-  density, mountain ranges, deserts/plateaus, rivers, peaks, seas, and a lat/long grid.
-  Click anywhere to see which country/state it's in; click a city dot for details.
+- **Explore**: a globe with Sentinel-2 cloudless imagery and flat navy water (maptap
+  uses its own Sentinel-2 tiles) and toggleable overlays: country borders,
+  states/provinces for the countries maptap names states for, the top-N cities *in
+  view* ranked by maptap-likeliness, population, or only places maptap has asked you,
+  population density, mountain ranges, deserts/plateaus, rivers, peaks, seas, and a
+  lat/long grid. Click anywhere to see which country/state it's in; click a city dot
+  for details.
 - **Practice**: endless maptap-style rounds (sets of 5). Places come from everything
-  maptap has asked you (from your stats) plus a generated pool of capitals and
-  large/regional cities. Scoring mimics maptap (`100·e^(−km/4600)`). Progressive hints
-  (country outline → state → nearby city → circle). The reveal explains where the place
-  is relative to big cities, the capital, mountains, rivers and the coast, and tells you
-  when your guess landed in the wrong country or state.
+  maptap has asked you (from your stats) plus generated cities the likeliness model
+  rates highly. Scoring mimics maptap (`100·e^(−km/4600)`).
+  - Hold on the globe for 2 s to guess, or click then Enter. With a timer, a single
+    click guesses instantly.
+  - Each guess moves straight on to the next place; the previous round's result sits in
+    the corner card. Browse past rounds with the card's arrows (or ←/→) or the session
+    list.
+  - Overlays start hidden. O toggles your Explore overlays, H gives progressive hints,
+    C outlines the country (or state), V hides/shows hint overlays, S skips.
+  - The result card explains where the place is relative to big cities, the capital,
+    mountains, rivers and the coast, and flags a guess in the wrong country or state.
 - **Drills** on the current view: find a city's dot, name a highlighted dot, find a
   country without borders, find a state.
 - **My stats**: load maptap's CSV exports; shows where your points go (by continent,
   country, place size), worst places, and lets you practise weak spots. Stored in
   localStorage only.
+
+## maptap-likeliness
+
+A logistic fit of which GeoNames cities (>15k people) maptap has asked about gives
+
+    logit = -3.91 + 2.23*(log10(pop) - 5) + 1.74*admin_capital + 4.62*national_capital
+            - 1.25*satellite
+
+where *satellite* means a city at least twice as big lies within 40 km. Metro-area
+satellites (e.g. Gazipur next to Dhaka) are ~3.5x less likely than standalone cities of
+the same size, and state/provincial capitals are strongly favoured.
 
 ## Data
 
@@ -32,11 +51,12 @@ through any static file server (e.g. `python -m http.server` in this folder).
   https://github.com/nvkelso/natural-earth-vector/tree/master/geojson:
   `ne_10m_admin_0_countries`, `ne_10m_admin_1_states_provinces`,
   `ne_10m_geography_regions_polys`, `ne_10m_geography_regions_elevation_points`,
-  `ne_50m_rivers_lake_centerlines`, `ne_50m_lakes`, `ne_50m_geography_marine_polys`,
-  `ne_50m_ocean`
+  `ne_10m_rivers_lake_centerlines`, `ne_50m_lakes`, `ne_10m_lakes`,
+  `ne_50m_geography_marine_polys`, `ne_10m_ocean`
 
 Put the downloads (unzipped) in `../data-raw/` and maptap CSV exports in `../scores/`, then:
 
     python tools/build_data.py ../data-raw ../scores
 
-Imagery tiles load at runtime from NASA GIBS and Esri; labels use OpenMapTiles fonts.
+Imagery tiles load at runtime from EOX (Sentinel-2 cloudless 2020, CC BY-NC-SA 4.0),
+NASA GIBS and Esri; labels use OpenMapTiles fonts.

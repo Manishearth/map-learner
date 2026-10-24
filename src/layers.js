@@ -6,12 +6,14 @@ const Layers = (() => {
   const FONT_B = ['Open Sans Bold'];
   const FONT_I = ['Open Sans Italic'];
   const GIBS = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/';
-  const OCEAN = '#0c2160';
+  const EOX = 'https://tiles.maps.eox.at/wmts/1.0.0/';
+  // maptap paints all water one flat navy over Sentinel-2 imagery.
+  const OCEAN = '#0a1a58';
 
   let map;
   // Which layers each overlay toggle controls.
   const GROUPS = {
-    ocean: ['ocean-fill'],
+    ocean: ['ocean-fill', 'lake-fill'],
     graticule: ['grat-line', 'grat-major', 'grat-label'],
     borders: ['country-line'],
     countryLabels: ['country-label', 'country-label-minor'],
@@ -19,7 +21,6 @@ const Layers = (() => {
     stateLabels: ['state-label'],
     cities: ['city-dot'],
     cityLabels: ['city-label'],
-    seenCities: ['seen-dot'],
     heatmap: ['heat'],
     ranges: ['range-fill', 'range-line', 'range-label'],
     deserts: ['other-fill', 'other-label'],
@@ -28,7 +29,24 @@ const Layers = (() => {
     seas: ['sea-label'],
   };
   const state = {};   // overlay name -> bool
-  let cityCount = 400, capitalsOnly = false;
+  let cityCount = 40, capitalsOnly = false, cityMode = 'likely';
+
+  // Every labelable place: GeoNames cities plus places maptap has asked (seen).
+  // `id` is the feature id used in filters; r/lr/sr are sort ranks for the
+  // three city modes (population, maptap-likeliness, seen).
+  const places = [];
+  const orders = { pop: [], likely: [], seen: [] };
+  function buildPlaces() {
+    for (const c of Geo.cities) places.push({ id: c.i, name: c.name, lat: c.lat, lon: c.lon,
+      pop: c.pop, flag: c.flag, likely: c.likely, cityIndex: c.i });
+    const base = places.length;
+    (MT.seen || []).forEach((r, k) => places.push({ id: base + k, name: r[0].split(',')[0],
+      label: r[0], lat: r[1], lon: r[2], pop: r[4], flag: 0, seen: 1 }));
+    orders.pop = places.filter(p => !p.seen);   // cities are already sorted by population
+    orders.likely = orders.pop.slice().sort((a, b) => b.likely - a.likely);
+    orders.seen = places.filter(p => p.seen).sort((a, b) => b.pop - a.pop);
+    for (const [k, list] of Object.entries(orders)) list.forEach((p, i) => { p[k + 'Rank'] = i; });
+  }
 
   function pointsFrom(fc, extra) {
     return {
@@ -41,11 +59,14 @@ const Layers = (() => {
   }
 
   function citiesFC() {
+    if (!places.length) buildPlaces();
+    const big = 1e9;
     return {
       type: 'FeatureCollection',
-      features: Geo.cities.map(c => ({
-        type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
-        properties: { r: c.i, n: c.name, p: c.pop, f: c.flag },
+      features: places.map(p => ({
+        type: 'Feature', geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
+        properties: { id: p.id, n: p.name, p: p.pop, f: p.flag, s: p.seen || 0,
+          r: p.popRank ?? big, lr: p.likelyRank ?? big, sr: p.seenRank ?? big },
       })),
     };
   }
@@ -85,6 +106,8 @@ const Layers = (() => {
       glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
       sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] },
       sources: {
+        s2: raster(EOX + 's2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg', 14,
+          'Sentinel-2 cloudless 2020 by EOX IT Services GmbH (contains modified Copernicus Sentinel data)'),
         bm: raster(GIBS + 'BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg',
           8, 'Imagery: NASA Blue Marble (GIBS)'),
         relief: raster(GIBS + 'BlueMarble_ShadedRelief_Bathymetry/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg',
@@ -98,13 +121,12 @@ const Layers = (() => {
         states: { type: 'geojson', data: MT.admin1 },
         statePts: { type: 'geojson', data: pointsFrom(MT.admin1) },
         cities: { type: 'geojson', data: citiesFC() },
-        seen: { type: 'geojson', data: {
-          type: 'FeatureCollection', features: (MT.seen || []).map(r => ({ type: 'Feature',
-            geometry: { type: 'Point', coordinates: [r[2], r[1]] }, properties: { n: r[0] } })) } },
         regions: { type: 'geojson', data: ph.regions },
         peaks: { type: 'geojson', data: ph.peaks },
         rivers: { type: 'geojson', data: ph.rivers },
         lakes: { type: 'geojson', data: ph.lakes },
+        water: { type: 'geojson', data: MT.lakes },
+        review: { type: 'geojson', data: EMPTY },
         seas: { type: 'geojson', data: ph.seas },
         grat: { type: 'geojson', data: graticuleFC() },
         stats: { type: 'geojson', data: EMPTY },
@@ -112,12 +134,18 @@ const Layers = (() => {
         drill: { type: 'geojson', data: EMPTY },
       },
       layers: [
-        { id: 'bg', type: 'background', paint: { 'background-color': OCEAN } },
-        { id: 'base-bm', type: 'raster', source: 'bm' },
+        // Land-ish tone: MapLibre's globe can leave hairline gaps between raster
+        // tiles, and a dark olive background hides them on land (water is drawn
+        // by ocean-fill anyway).
+        { id: 'bg', type: 'background', paint: { 'background-color': '#28331f' } },
+        { id: 'base-s2', type: 'raster', source: 's2' },
+        { id: 'base-bm', type: 'raster', source: 'bm', layout: { visibility: 'none' } },
         { id: 'base-relief', type: 'raster', source: 'relief', layout: { visibility: 'none' } },
         { id: 'base-esri', type: 'raster', source: 'esri', layout: { visibility: 'none' } },
         { id: 'ocean-fill', type: 'fill', source: 'ocean',
-          paint: { 'fill-color': OCEAN, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 6, 1, 9, 0.6] } },
+          paint: { 'fill-color': OCEAN, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 8, 1, 11, 0.5] } },
+        { id: 'lake-fill', type: 'fill', source: 'water',
+          paint: { 'fill-color': OCEAN, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 8, 1, 11, 0.5] } },
         { id: 'heat', type: 'heatmap', source: 'cities', layout: { visibility: 'none' },
           paint: {
             'heatmap-weight': ['interpolate', ['linear'], ['get', 'p'], 15000, 0.02, 200000, 0.15, 2000000, 0.6, 20000000, 1],
@@ -160,6 +188,14 @@ const Layers = (() => {
           paint: { 'line-color': '#ffd84a', 'line-width': 3 } },
         { id: 'hl-wrong-fill', type: 'fill', source: 'countries', filter: ['==', ['get', 'iso'], '\u0000'],
           paint: { 'fill-color': '#ff5050', 'fill-opacity': 0.18 } },
+        { id: 'rv-wrong-fill', type: 'fill', source: 'countries', filter: ['==', ['get', 'iso'], '\u0000'],
+          paint: { 'fill-color': '#ff5050', 'fill-opacity': 0.16 } },
+        { id: 'rv-state-line', type: 'line', source: 'states', filter: ['==', ['get', 'name'], '\u0000'],
+          paint: { 'line-color': '#7fe0a0', 'line-width': 1.5, 'line-dasharray': [2, 1] } },
+        { id: 'rv-country-line', type: 'line', source: 'countries', filter: ['==', ['get', 'iso'], '\u0000'],
+          paint: { 'line-color': '#3ddc84', 'line-width': 2.5 } },
+        { id: 'review-line', type: 'line', source: 'review',
+          paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-dasharray': [2, 1.5] } },
         { id: 'game-line', type: 'line', source: 'game', filter: ['==', ['geometry-type'], 'LineString'],
           paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-dasharray': [2, 1.5] } },
         { id: 'game-area', type: 'fill', source: 'game', filter: ['==', ['geometry-type'], 'Polygon'],
@@ -170,15 +206,13 @@ const Layers = (() => {
             'circle-color': ['interpolate', ['linear'], ['get', 'avg'], 40, '#d7191c', 75, '#fdae61', 90, '#ffffbf', 97, '#1a9641'],
             'circle-stroke-color': '#000', 'circle-stroke-width': 1,
           } },
-        { id: 'seen-dot', type: 'circle', source: 'seen', layout: { visibility: 'none' },
-          paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 2.5, 6, 5],
-            'circle-color': '#ff7ad9', 'circle-stroke-color': '#000', 'circle-stroke-width': 0.8 } },
         { id: 'city-dot', type: 'circle', source: 'cities',
           paint: {
             'circle-radius': ['interpolate', ['linear'], ['zoom'],
               1, ['interpolate', ['linear'], ['get', 'p'], 0, 1.5, 1e6, 2.5, 1e7, 4],
               8, ['interpolate', ['linear'], ['get', 'p'], 0, 3.5, 1e6, 6, 1e7, 8]],
-            'circle-color': ['match', ['get', 'f'], 2, '#ff4040', 1, '#ffa040', '#ffffff'],
+            'circle-color': ['case', ['==', ['get', 's'], 1], '#ff7ad9',
+              ['match', ['get', 'f'], 2, '#ff4040', 1, '#ffa040', '#ffffff']],
             'circle-stroke-color': '#000', 'circle-stroke-width': 1,
           } },
         { id: 'drill-dot', type: 'circle', source: 'drill',
@@ -224,7 +258,7 @@ const Layers = (() => {
           minzoom: 2.2,
           paint: { 'text-color': '#cfeaff', 'text-halo-color': '#000', 'text-halo-width': 1.2, 'text-opacity': 0.9 } },
         { id: 'city-label', type: 'symbol', source: 'cities',
-          layout: { 'text-field': ['get', 'n'], 'text-font': FONT, 'symbol-sort-key': ['get', 'r'],
+          layout: { 'text-field': ['get', 'n'], 'text-font': FONT, 'symbol-sort-key': ['get', 'lr'],
             'text-size': ['interpolate', ['linear'], ['get', 'p'], 0, 11, 1e6, 13, 1e7, 15],
             'text-anchor': 'left', 'text-offset': [0.5, 0], 'text-optional': false },
           paint: { 'text-color': '#ffffff', 'text-halo-color': '#000', 'text-halo-width': 1.4 } },
@@ -258,6 +292,7 @@ const Layers = (() => {
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
+    map.on('moveend', applyCityFilter);
     map.setPadding({ left: 340, top: 0, right: 0, bottom: 0 });
     return map;
   }
@@ -273,20 +308,45 @@ const Layers = (() => {
   }
 
   function setBasemap(which) {
-    for (const b of ['bm', 'relief', 'esri']) vis('base-' + b, b === which);
+    for (const b of ['s2', 'bm', 'relief', 'esri']) vis('base-' + b, b === which);
   }
 
+  // Is a point on the visible side of the globe and inside the viewport
+  // (excluding the side panel)?
+  function onScreen(lon, lat, margin = 0) {
+    const c = map.getCenter();
+    if (Geo.distKm({ lat: c.lat, lon: c.lng }, { lat, lon }) > 8500) return false;
+    const pt = map.project([lon, lat]);
+    const cv = map.getCanvas();
+    const pad = map.getPadding();
+    return pt.x > pad.left * 0.9 - margin && pt.x < cv.clientWidth + margin &&
+      pt.y > -margin && pt.y < cv.clientHeight + margin;
+  }
+
+  // Show the top-N places *in view* for the current mode, so zooming in
+  // reveals more local cities instead of only the world's biggest.
   function applyCityFilter() {
-    const f = ['all', ['<', ['get', 'r'], cityCount]];
-    if (capitalsOnly) f.push(['>', ['get', 'f'], 0]);
+    if (!map || !map.getLayer('city-dot')) return;
+    const ids = [];
+    if (cityCount > 0) {
+      for (const p of orders[cityMode]) {
+        if (capitalsOnly && !p.flag) continue;
+        if (!onScreen(p.lon, p.lat, 40)) continue;
+        ids.push(p.id);
+        if (ids.length >= cityCount) break;
+      }
+    }
+    const f = ['in', ['get', 'id'], ['literal', ids]];
     map.setFilter('city-dot', f);
     map.setFilter('city-label', f);
-    const any = cityCount > 0;
-    vis('city-dot', any && state.cities !== false);
-    vis('city-label', any && state.cities !== false && state.cityLabels !== false);
+    map.setLayoutProperty('city-label', 'symbol-sort-key',
+      ['get', { pop: 'r', likely: 'lr', seen: 'sr' }[cityMode]]);
+    vis('city-dot', ids.length > 0 && state.cities !== false);
+    vis('city-label', ids.length > 0 && state.cities !== false && state.cityLabels !== false);
   }
   function setCityCount(n) { cityCount = n; applyCityFilter(); }
   function setCapitalsOnly(on) { capitalsOnly = on; applyCityFilter(); }
+  function setCityMode(m) { cityMode = m; applyCityFilter(); }
 
   // Save / restore overlay visibility (practice mode hides everything while guessing).
   function snapshot() { return Object.assign({}, state); }
@@ -307,6 +367,17 @@ const Layers = (() => {
     map.setFilter('hl-state-fill', f);
     map.setFilter('hl-state-line', f);
   }
+  // Separate highlight set for reviewing a past round, so it never mixes
+  // with hints for the current one.
+  function review(iso, stateName, wrongIso) {
+    const none = ['==', ['get', 'iso'], '\u0000'];
+    map.setFilter('rv-country-line', iso ? ['==', ['get', 'iso'], iso] : none);
+    map.setFilter('rv-wrong-fill', wrongIso ? ['==', ['get', 'iso'], wrongIso] : none);
+    map.setFilter('rv-state-line', stateName
+      ? ['all', ['==', ['get', 'iso'], iso], ['==', ['get', 'name'], stateName]] : none);
+  }
+  const HINT_LAYERS = ['hl-country-fill', 'hl-country-line', 'hl-state-fill', 'hl-state-line', 'game-area'];
+  function showHints(on) { for (const id of HINT_LAYERS) vis(id, on); }
   function clearHighlights() {
     highlightCountry(null); highlightCountry(null, 'wrong'); highlightState(null, null);
   }
@@ -329,7 +400,8 @@ const Layers = (() => {
     return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [coords] } };
   }
 
-  return { init, set, setBasemap, setCityCount, setCapitalsOnly, snapshot, restore, only,
+  return { init, set, setBasemap, setCityCount, setCapitalsOnly, setCityMode, snapshot, restore, only,
+    review, showHints, places, onScreen,
     highlightCountry, highlightState, clearHighlights, setData, circlePolygon, vis,
     get map() { return map; }, get state() { return state; } };
 })();

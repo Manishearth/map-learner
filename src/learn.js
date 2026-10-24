@@ -68,7 +68,8 @@ const Learn = (() => {
     const threshold = Math.max(500000, pop * 1.5);
     const bigOk = x => x.c.pop >= threshold && x.d > 8 && (!cap || x.c !== cap);
     const big = near.find(x => bigOk(x) && x.c.cc === cc && x.d < 600) || near.find(bigOk);
-    if (big) facts.push(`${rel(pt, big.c)} <b>${big.c.name}</b> (${Geo.fmtPop(big.c.pop)}${big.c.cc !== cc ? ', ' + Geo.countryName(big.c.cc) : ''})`);
+    // Skip a "big city" reference that's further away than the capital we'll mention anyway.
+    if (big && !(cap && Geo.distKm(cap, pt) < big.d)) facts.push(`${rel(pt, big.c)} <b>${big.c.name}</b> (${Geo.fmtPop(big.c.pop)}${big.c.cc !== cc ? ', ' + Geo.countryName(big.c.cc) : ''})`);
     const mid = near.find(x => x.c.pop >= 150000 && x.d > 8 && x.d < 150 && (!big || x.c !== big.c));
     if (mid && (!big || mid.d < big.d * 0.6)) facts.push(`${rel(pt, mid.c)} ${mid.c.name} (${Geo.fmtPop(mid.c.pop)})`);
 

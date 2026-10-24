@@ -26,7 +26,8 @@
     <h2>Base map</h2>
     <label class="row">Imagery
       <select id="basemap">
-        <option value="bm">Blue Marble (maptap-like)</option>
+        <option value="s2">Sentinel-2 (maptap-like)</option>
+        <option value="bm">Blue Marble</option>
         <option value="relief">Blue Marble + shaded relief</option>
         <option value="esri">Esri satellite (sharp when zoomed)</option>
       </select>
@@ -41,12 +42,18 @@
     <label class="check"><input type="checkbox" id="stateLabels" checked> State names</label>
 
     <h2>Cities</h2>
-    <label class="row">Show the <b id="cityCountOut">500</b> largest
-      <input type="range" id="cityCount" min="0" max="100" value="45">
+    <label class="row">Rank cities by
+      <select id="cityMode">
+        <option value="likely">Likely to come up in maptap</option>
+        <option value="pop">Population</option>
+        <option value="seen">Places maptap has asked me</option>
+      </select>
+    </label>
+    <label class="row">Show the top <b id="cityCountOut">40</b> in view
+      <input type="range" id="cityCount" min="0" max="100" value="50">
     </label>
     <label class="check"><input type="checkbox" id="cityLabels" checked> City names <small>(off = click dots to reveal)</small></label>
     <label class="check"><input type="checkbox" id="capitalsOnly"> Capitals only (national &amp; state)</label>
-    <label class="check"><input type="checkbox" id="seenCities"> Places maptap has asked <small>(from your stats)</small></label>
     <label class="check"><input type="checkbox" id="heatmap"> Population density</label>
 
     <h2>Nature</h2>
@@ -63,7 +70,9 @@
   </section>
 
   <section id="tab-practice" class="tab">
-    <p class="hint">Endless maptap-style rounds. Click the globe to place your guess, then press <kbd>Enter</kbd>.</p>
+    <p class="hint">Endless maptap-style rounds. <b>Hold</b> on the globe for 2&nbsp;s to guess, or click then press <kbd>Enter</kbd>.
+      With a timer, a single click guesses instantly. Overlays start hidden: <kbd>O</kbd> toggles your Explore overlays,
+      <kbd>H</kbd> hint, <kbd>C</kbd> outline the country/state, <kbd>V</kbd> show/hide hint overlays.</p>
     <label class="row">Places
       <select id="pSource">
         <option value="mixed">Mixed: maptap-style pool</option>
@@ -75,18 +84,10 @@
     <label class="row">Region
       <select id="pRegion"></select>
     </label>
-    <label class="row">While guessing show
-      <select id="pAssist">
-        <option value="none">Nothing (like maptap)</option>
-        <option value="borders">Country borders</option>
-        <option value="states">Borders + states</option>
-        <option value="nature">Borders + mountains + rivers</option>
-      </select>
-    </label>
     <label class="row">Timer
       <select id="pTimer">
         <option value="0">Off (daily mode)</option>
-        <option value="25">25 s (versus)</option>
+        <option value="25">25 s (versus: click = instant guess)</option>
         <option value="20">20 s</option>
       </select>
     </label>
@@ -126,6 +127,7 @@
 <script src="data/cities.js"></script>
 <script src="data/physical.js"></script>
 <script src="data/ocean.js"></script>
+<script src="data/lakes.js"></script>
 <script src="data/seen.js"></script>
 <script src="src/geo.js"></script>
 <script src="src/layers.js"></script>

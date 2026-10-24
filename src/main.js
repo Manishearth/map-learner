@@ -5,7 +5,7 @@ const UI = (() => {
   const $ = id => document.getElementById(id);
   const PREFS = 'mt.ui.v1';
   const TOGGLES = ['ocean', 'graticule', 'borders', 'countryLabels', 'states', 'stateLabels',
-    'cityLabels', 'seenCities', 'heatmap', 'ranges', 'deserts', 'peaks', 'rivers', 'seas'];
+    'cityLabels', 'heatmap', 'ranges', 'deserts', 'peaks', 'rivers', 'seas'];
   let placeMarker = null, toastTimer = null;
 
   function toast(msg) {
@@ -44,8 +44,12 @@ const UI = (() => {
 
   // Map padding that keeps a point clear of the side panel and the result card.
   function revealPadding() {
-    const left = $('panel').classList.contains('collapsed') ? 40 : 380;
-    return { left, right: 400, top: 110, bottom: 50 };
+    const w = Layers.map.getContainer().clientWidth, h = Layers.map.getContainer().clientHeight;
+    let left = $('panel').classList.contains('collapsed') ? 40 : 360;
+    let right = 390;   // room for the result card
+    const spare = w - left - right - 150;
+    if (spare < 0) { left = Math.max(20, left + spare / 2); right = Math.max(20, right + spare / 2); }
+    return { left, right, top: Math.min(110, h / 5), bottom: Math.min(50, h / 10) };
   }
 
   function switchTab(name) {
@@ -62,13 +66,14 @@ const UI = (() => {
     Practice.start();
   }
 
-  const sliderToCount = v => v <= 0 ? 0 : Math.round(10 * Math.pow(Geo.cities.length / 10, v / 100));
+  // 0..100 -> 0, 3 .. ~1000 cities in view (log scale).
+  const sliderToCount = v => v <= 0 ? 0 : Math.round(3 * Math.pow(10, v / 100 * 2.5));
 
   function savePrefs() {
-    const p = { basemap: $('basemap').value, cityCount: $('cityCount').value,
+    const p = { basemap: $('basemap').value, cityCount: $('cityCount').value, cityMode: $('cityMode').value,
       capitalsOnly: $('capitalsOnly').checked };
     for (const t of TOGGLES) p[t] = $(t).checked;
-    for (const id of ['pSource', 'pRegion', 'pAssist', 'pTimer', 'drillCount']) p[id] = $(id).value;
+    for (const id of ['pSource', 'pRegion', 'pTimer', 'drillCount']) p[id] = $(id).value;
     try { localStorage.setItem(PREFS, JSON.stringify(p)); } catch (e) { /* ignore */ }
   }
   function loadPrefs() {
@@ -76,9 +81,10 @@ const UI = (() => {
     try { p = JSON.parse(localStorage.getItem(PREFS)) || {}; } catch (e) { /* ignore */ }
     if (p.basemap) $('basemap').value = p.basemap;
     if (p.cityCount) $('cityCount').value = p.cityCount;
+    if (p.cityMode) $('cityMode').value = p.cityMode;
     if ('capitalsOnly' in p) $('capitalsOnly').checked = p.capitalsOnly;
     for (const t of TOGGLES) if (t in p) $(t).checked = p[t];
-    for (const id of ['pSource', 'pRegion', 'pAssist', 'pTimer', 'drillCount']) if (p[id]) $(id).value = p[id];
+    for (const id of ['pSource', 'pRegion', 'pTimer', 'drillCount']) if (p[id]) $(id).value = p[id];
   }
 
   function applyControls() {
@@ -87,6 +93,7 @@ const UI = (() => {
     Layers.set('cities', true);
     const n = sliderToCount(+$('cityCount').value);
     $('cityCountOut').textContent = n.toLocaleString();
+    Layers.setCityMode($('cityMode').value);
     Layers.setCityCount(n);
     Layers.setCapitalsOnly($('capitalsOnly').checked);
     $('drillCountOut').textContent = $('drillCount').value;
@@ -114,8 +121,11 @@ const UI = (() => {
         const b = Geo.bboxOf(r.f.geometry);
         Layers.clearHighlights();
         Layers.highlightCountry(r.f.properties.iso);
-        if (b[2] - b[0] < 180) Layers.map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 60, maxZoom: 7 });
-        else Layers.map.flyTo({ center: [r.f.properties.lx, r.f.properties.ly], zoom: 3 });
+        // fitBounds is broken in globe projection; size the zoom from the bbox diagonal.
+        const km = b[2] - b[0] < 180 ? Geo.distKm({ lat: b[1], lon: b[0] }, { lat: b[3], lon: b[2] }) : 8000;
+        const avail = Math.min(Layers.map.getContainer().clientWidth - 420, Layers.map.getContainer().clientHeight - 80);
+        const zoom = Math.max(1.5, Math.min(7, Math.log2(Math.max(150, avail) * 40075 / (512 * Math.max(km, 30)))));
+        Layers.map.flyTo({ center: [r.f.properties.lx, r.f.properties.ly], zoom });
       }
     };
   }
@@ -126,14 +136,14 @@ const UI = (() => {
     const map = Layers.map;
     const pt = e.point;
     const box = [[pt.x - 6, pt.y - 6], [pt.x + 6, pt.y + 6]];
-    const layers = ['city-dot', 'stats-dot', 'seen-dot'].filter(l => map.getLayoutProperty(l, 'visibility') !== 'none');
+    const layers = ['city-dot', 'stats-dot'].filter(l => map.getLayoutProperty(l, 'visibility') !== 'none');
     const hits = map.queryRenderedFeatures(box, { layers });
     if (popup) popup.remove();
     let html;
     if (hits.length) {
       const h = hits[0];
-      if (h.layer.id === 'city-dot') {
-        const c = Geo.cities[h.properties.r];
+      if (h.layer.id === 'city-dot' && !h.properties.s) {
+        const c = Geo.cities[h.properties.id];
         const kind = c.flag === 2 ? 'national capital' : c.flag === 1 ? 'state/provincial capital' : '';
         html = `<b>${c.name}</b><br>${Geo.cityLabel(c).split(', ').slice(1).join(', ')}<br>
           pop ${Geo.fmtPop(c.pop)}${kind ? ' · ' + kind : ''}<br><a href="#" id="popMore">Learn more…</a>`;
@@ -141,7 +151,7 @@ const UI = (() => {
         $('popMore').onclick = ev => { ev.preventDefault(); popup.remove(); showPlace(Object.assign({ label: Geo.cityLabel(c) }, c)); };
         return;
       }
-      const label = h.properties.label || h.properties.n;
+      const label = h.properties.label || (h.properties.s ? Layers.places[h.properties.id].label : h.properties.n);
       const avg = Stats.avgFor(label);
       html = `<b>${label}</b>${avg !== null ? `<br>Your avg: ${avg}` : ''}`;
       popup = new maplibregl.Popup().setLngLat(h.geometry.coordinates).setHTML(html).addTo(map);
@@ -175,24 +185,31 @@ const UI = (() => {
     map.on('mouseleave', 'city-dot', () => { map.getCanvas().style.cursor = ''; });
 
     for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => switchTab(b.dataset.tab);
-    for (const id of [...TOGGLES, 'basemap', 'cityCount', 'capitalsOnly', 'drillCount']) {
+    for (const id of [...TOGGLES, 'basemap', 'cityMode', 'cityCount', 'capitalsOnly', 'drillCount']) {
       $(id).addEventListener('input', () => {
         savePrefs();
         if (Practice.active || Drill.active) UI.toast('Overlay changes apply after you stop the game.');
         else applyControls();
       });
     }
-    for (const id of ['pSource', 'pRegion', 'pAssist', 'pTimer']) $(id).addEventListener('change', savePrefs);
+    for (const id of ['pSource', 'pRegion', 'pTimer']) $(id).addEventListener('change', savePrefs);
+    const canvas = map.getCanvasContainer();
+    canvas.addEventListener('pointerdown', e => Practice.onPointerDown(e));
+    canvas.addEventListener('pointermove', e => Practice.onPointerMove(e));
+    canvas.addEventListener('pointerup', e => Practice.onPointerUp(e));
+    canvas.addEventListener('pointercancel', e => Practice.onPointerUp(e));
     $('pStart').onclick = () => { Drill.stop(); Practice.start(); };
     for (const b of document.querySelectorAll('[data-drill]')) b.onclick = () => Drill.start(b.dataset.drill);
     $('statsFiles').onchange = e => Stats.addFiles(e.target.files);
     $('search').addEventListener('input', e => search(e.target.value));
     $('collapse').onclick = () => {
       $('panel').classList.add('collapsed');
+      document.body.classList.add('collapsed');
       map.easeTo({ padding: { left: 0, top: 0, right: 0, bottom: 0 } });
     };
     $('expand').onclick = () => {
       $('panel').classList.remove('collapsed');
+      document.body.classList.remove('collapsed');
       map.easeTo({ padding: { left: 340, top: 0, right: 0, bottom: 0 } });
     };
 
